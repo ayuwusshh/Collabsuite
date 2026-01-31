@@ -1,0 +1,456 @@
+import React, { useRef, useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, Users, Settings } from 'lucide-react';
+import Peer from 'simple-peer';
+import { io } from 'socket.io-client';
+
+const VideoMeet = () => {
+    const { id } = useParams();
+    const navigate = useNavigate();
+
+    // State
+    const [stream, setStream] = useState(null);
+    const [peers, setPeers] = useState([]); // [{ peerID, peer, stream }]
+    const [audioEnabled, setAudioEnabled] = useState(true);
+    const [videoEnabled, setVideoEnabled] = useState(true);
+    const [isJoined, setIsJoined] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    // Refs
+    const userVideo = useRef();
+    const socketRef = useRef();
+    const peersRef = useRef([]); // To keep track for signaling without re-renders
+
+    // Setup local media on mount
+    useEffect(() => {
+        const setupMedia = async () => {
+            try {
+                const currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                setStream(currentStream);
+                if (userVideo.current) {
+                    userVideo.current.srcObject = currentStream;
+                }
+            } catch (error) {
+                console.error('Media Access Error:', error);
+                alert('Please allow camera and microphone access.');
+            }
+        };
+        setupMedia();
+
+        return () => {
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (socketRef.current) socketRef.current.disconnect();
+        };
+    }, []);
+
+    // Ensure video element always has the stream
+    useEffect(() => {
+        if (userVideo.current && stream) {
+            userVideo.current.srcObject = stream;
+        }
+    }, [stream, isJoined]);
+
+    const joinMeeting = () => {
+        if (!stream) {
+            alert('Please wait for camera to initialize');
+            return;
+        }
+
+        setIsJoined(true);
+
+        // Ensure video element has the stream
+        if (userVideo.current && stream) {
+            userVideo.current.srcObject = stream;
+        }
+
+        const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+        socketRef.current = socket;
+
+        socket.emit('join-room', `meet_${id}`);
+
+        socket.on('user-joined', (userId) => {
+            console.log("New user joined:", userId);
+            const peer = createPeer(userId, socket.id, stream);
+            peersRef.current.push({
+                peerID: userId,
+                peer,
+            });
+            // We'll update the state when the stream is received in PeerVideo or here?
+            // Usually simple-peer emits 'stream'.
+            setPeers(prev => [...prev, { peerID: userId, peer }]);
+        });
+
+        socket.on('signal', ({ signal, from }) => {
+            const item = peersRef.current.find(p => p.peerID === from);
+            if (item) {
+                item.peer.signal(signal);
+            } else {
+                const peer = addPeer(signal, from, stream);
+                peersRef.current.push({
+                    peerID: from,
+                    peer,
+                });
+                setPeers(prev => [...prev, { peerID: from, peer }]);
+            }
+        });
+
+        socket.on('user-left', (userId) => {
+            console.log("User left:", userId);
+            const peerObj = peersRef.current.find(p => p.peerID === userId);
+            if (peerObj) peerObj.peer.destroy();
+
+            peersRef.current = peersRef.current.filter(p => p.peerID !== userId);
+            setPeers(prev => prev.filter(p => p.peerID !== userId));
+        });
+    };
+
+    const createPeer = (userToSignal, callerID, stream) => {
+        console.log('Creating peer for user:', userToSignal);
+        const peer = new Peer({
+            initiator: true,
+            trickle: false,
+            stream,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+        });
+
+        peer.on('signal', signal => {
+            console.log('Sending signal to:', userToSignal);
+            socketRef.current.emit('signal', { to: userToSignal, signal });
+        });
+
+        peer.on('stream', remoteStream => {
+            console.log('Received stream from peer:', userToSignal);
+        });
+
+        peer.on('error', err => {
+            console.error('Peer error:', err);
+        });
+
+        return peer;
+    };
+
+    const addPeer = (incomingSignal, callerID, stream) => {
+        console.log('Adding peer from:', callerID);
+        const peer = new Peer({
+            initiator: false,
+            trickle: false,
+            stream,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+        });
+
+        peer.on('signal', signal => {
+            console.log('Sending signal back to:', callerID);
+            socketRef.current.emit('signal', { to: callerID, signal });
+        });
+
+        peer.on('stream', remoteStream => {
+            console.log('Received stream from caller:', callerID);
+        });
+
+        peer.on('error', err => {
+            console.error('Peer error:', err);
+        });
+
+        peer.signal(incomingSignal);
+        return peer;
+    };
+
+    const toggleAudio = () => {
+        if (stream) {
+            stream.getAudioTracks()[0].enabled = !audioEnabled;
+            setAudioEnabled(!audioEnabled);
+        }
+    };
+
+    const toggleVideo = () => {
+        if (stream) {
+            stream.getVideoTracks()[0].enabled = !videoEnabled;
+            setVideoEnabled(!videoEnabled);
+        }
+    };
+
+    const leaveMeeting = () => {
+        console.log('🚪 Leaving meeting - cleaning up resources');
+
+        // Stop all local media tracks (camera and microphone)
+        if (stream) {
+            stream.getTracks().forEach(track => {
+                track.stop();
+                console.log('Stopped track:', track.kind);
+            });
+        }
+
+        // Destroy all peer connections
+        peersRef.current.forEach(({ peer }) => {
+            peer.destroy();
+        });
+        peersRef.current = [];
+        setPeers([]);
+
+        // Disconnect socket
+        if (socketRef.current) {
+            socketRef.current.disconnect();
+        }
+
+        // Navigate back to meetings page
+        navigate('/dashboard/meetings');
+    };
+
+    const copyMeetingId = () => {
+        // Copy only the meeting ID/code
+        navigator.clipboard.writeText(id);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    if (!isJoined) {
+        return (
+            <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#0B1220] via-[#0f1829] to-[#0B1220] p-4 text-white">
+                <div className="max-w-3xl w-full">
+                    {/* Header */}
+                    <div className="text-center mb-6">
+                        <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-2">Ready to join?</h1>
+                        <p className="text-sm text-gray-400">Check your camera and microphone before joining</p>
+                    </div>
+
+                    {/* Video Preview Card */}
+                    <div className="bg-[#1a2332]/60 backdrop-blur-xl border border-gray-700/40 rounded-2xl p-6 shadow-2xl mb-6">
+                        <div className="relative aspect-video bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl overflow-hidden border border-gray-700/50 shadow-inner">
+                            <video ref={userVideo} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+
+                            {!videoEnabled && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-gray-900/95 to-gray-800/95">
+                                    <div className="w-20 h-20 rounded-full bg-gray-800/50 flex items-center justify-center mb-3">
+                                        <VideoOff className="w-10 h-10 text-gray-500" />
+                                    </div>
+                                    <p className="text-sm text-gray-400">Camera is off</p>
+                                </div>
+                            )}
+
+                            {/* Control Overlay */}
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
+                                <div className="flex items-center justify-center gap-3">
+                                    <button
+                                        onClick={toggleAudio}
+                                        className={`p-3.5 rounded-full transition-all shadow-lg ${audioEnabled
+                                            ? 'bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20'
+                                            : 'bg-red-500 hover:bg-red-600'
+                                            }`}
+                                    >
+                                        {audioEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                                    </button>
+                                    <button
+                                        onClick={toggleVideo}
+                                        className={`p-3.5 rounded-full transition-all shadow-lg ${videoEnabled
+                                            ? 'bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20'
+                                            : 'bg-red-500 hover:bg-red-600'
+                                            }`}
+                                    >
+                                        {videoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Status Indicators */}
+                            <div className="absolute top-3 left-3 flex gap-2">
+                                {!audioEnabled && (
+                                    <div className="px-2.5 py-1 bg-red-500/90 backdrop-blur-sm rounded-md flex items-center gap-1.5">
+                                        <MicOff className="w-3.5 h-3.5" />
+                                        <span className="text-xs font-medium">Muted</span>
+                                    </div>
+                                )}
+                                {!videoEnabled && (
+                                    <div className="px-2.5 py-1 bg-red-500/90 backdrop-blur-sm rounded-md flex items-center gap-1.5">
+                                        <VideoOff className="w-3.5 h-3.5" />
+                                        <span className="text-xs font-medium">Camera Off</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <button
+                            onClick={joinMeeting}
+                            disabled={!stream}
+                            className="flex-1 px-6 py-3.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+                        >
+                            <Video className="w-5 h-5" />
+                            Join Meeting
+                        </button>
+                        <button
+                            onClick={() => navigate('/dashboard/meetings')}
+                            className="px-6 py-3.5 bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700/50 text-white rounded-xl font-medium transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+
+                    {/* Meeting Info */}
+                    <div className="mt-6 text-center">
+                        <p className="text-xs text-gray-500">
+                            Meeting ID: <span className="text-gray-400 font-mono">{id}</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="h-full flex flex-col bg-[#0B1220] text-white">
+            {/* Header */}
+            <div className="flex items-center justify-between p-2 sm:p-3 md:p-4 bg-[#1a2332]/50 backdrop-blur-md border-b border-gray-800/50">
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                    <div className="p-1.5 sm:p-2 bg-blue-500/20 rounded-lg">
+                        <Users className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                    </div>
+                    <div>
+                        <h2 className="text-xs sm:text-sm md:text-base font-semibold text-white tracking-wide">
+                            <span className="hidden sm:inline">Work Meeting: </span>{id}
+                        </h2>
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                            <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-500 animate-pulse"></span>
+                            <p className="text-[10px] sm:text-xs text-slate-400">
+                                {peers.length + 1} <span className="hidden sm:inline">People</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3">
+                    <button onClick={copyMeetingId} className="flex items-center gap-1 sm:gap-1.5 md:gap-2 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-blue-600/20 hover:bg-blue-600/30 rounded-md sm:rounded-lg text-[10px] sm:text-xs md:text-sm transition-all border border-blue-500/30">
+                        {copied ? <><Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-400" /> <span className="hidden sm:inline">Copied!</span></> : <><Copy className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400" /> <span className="hidden sm:inline">Invite</span></>}
+                    </button>
+                    <button className="p-1.5 sm:p-2 bg-gray-800/50 rounded-md sm:rounded-lg text-slate-400 hover:text-white transition-colors border border-gray-700/50">
+                        <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Video Grid */}
+            <div className="flex-1 p-3 sm:p-4 md:p-6 overflow-y-auto bg-gradient-to-br from-[#0B1220] to-[#0f1829]">
+                <div className="h-full flex items-center justify-center">
+                    <div className={`w-full grid gap-2 sm:gap-3 md:gap-4 lg:gap-6 ${peers.length === 0
+                        ? 'grid-cols-1 max-w-4xl'
+                        : peers.length === 1
+                            ? 'grid-cols-1 sm:grid-cols-2 max-w-5xl'
+                            : peers.length === 2
+                                ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl'
+                                : peers.length === 3
+                                    ? 'grid-cols-2 lg:grid-cols-4 max-w-7xl'
+                                    : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 max-w-7xl'
+                        }`}>
+                        {/* User's Video */}
+                        <div className="relative aspect-video bg-slate-900/50 rounded-xl sm:rounded-2xl lg:rounded-3xl overflow-hidden border border-gray-700/30 group">
+                            <video ref={userVideo} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="absolute bottom-2 sm:bottom-3 lg:bottom-4 left-2 sm:left-3 lg:left-4 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-medium border border-white/10">
+                                <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-blue-500"></span>
+                                <span className="hidden sm:inline">You</span>
+                                <span className="sm:hidden">Me</span>
+                            </div>
+                            {!audioEnabled && (
+                                <div className="absolute top-2 sm:top-3 lg:top-4 right-2 sm:right-3 lg:right-4 p-1 sm:p-1.5 bg-red-500/20 backdrop-blur-md rounded-md sm:rounded-lg border border-red-500/50">
+                                    <MicOff className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-400" />
+                                </div>
+                            )}
+                            {!videoEnabled && (
+                                <div className="absolute top-2 sm:top-3 lg:top-4 right-10 sm:right-12 lg:right-16 p-1 sm:p-1.5 bg-red-500/20 backdrop-blur-md rounded-md sm:rounded-lg border border-red-500/50">
+                                    <VideoOff className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-400" />
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Peer Videos */}
+                        {peers.map((peer, index) => (
+                            <PeerVideo key={peer.peerID} peer={peer.peer} index={index + 1} />
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center justify-between p-3 sm:p-4 md:p-6 bg-[#1a2332]/80 backdrop-blur-xl border-t border-gray-800/50">
+                <div className="hidden md:flex items-center gap-2 text-slate-400">
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-slate-800 flex items-center justify-center text-[10px] sm:text-xs font-bold text-white uppercase">
+                        {id.substring(0, 2)}
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-4 mx-auto md:mx-0">
+                    <button onClick={toggleAudio} className={`p-3 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl transition-all shadow-lg ${audioEnabled ? 'bg-slate-800 hover:bg-slate-700' : 'bg-red-500 hover:bg-red-600'}`}>
+                        {audioEnabled ? <Mic className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> : <MicOff className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />}
+                    </button>
+                    <button onClick={toggleVideo} className={`p-3 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl transition-all shadow-lg ${videoEnabled ? 'bg-slate-800 hover:bg-slate-700' : 'bg-red-500 hover:bg-red-600'}`}>
+                        {videoEnabled ? <Video className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> : <VideoOff className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />}
+                    </button>
+                    <button onClick={leaveMeeting} className="px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-5 rounded-xl sm:rounded-2xl bg-red-600 hover:bg-red-700 transition-all shadow-lg shadow-red-500/20 flex items-center gap-2 sm:gap-3 font-semibold sm:font-bold group text-xs sm:text-sm md:text-base">
+                        <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 group-active:scale-95 transition-transform" />
+                        <span className="hidden sm:inline">End Meeting</span>
+                        <span className="sm:hidden">End</span>
+                    </button>
+                </div>
+
+                <div className="hidden md:block">
+                    {/* Placeholder for more controls */}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const PeerVideo = ({ peer, index }) => {
+    const ref = useRef();
+    const [remoteStream, setRemoteStream] = useState(null);
+
+    useEffect(() => {
+        const handleStream = (stream) => {
+            console.log("Receiving remote stream for peer", index, stream);
+            setRemoteStream(stream);
+            if (ref.current) {
+                ref.current.srcObject = stream;
+            }
+        };
+
+        const handleError = (err) => {
+            console.error("Peer video error:", err);
+        };
+
+        peer.on('stream', handleStream);
+        peer.on('error', handleError);
+
+        return () => {
+            peer.off('stream', handleStream);
+            peer.off('error', handleError);
+        };
+    }, [peer, index]);
+
+    return (
+        <div className="relative aspect-video bg-slate-900/50 rounded-xl sm:rounded-2xl lg:rounded-3xl overflow-hidden border border-gray-700/30 group">
+            <video ref={ref} autoPlay playsInline className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="absolute bottom-2 sm:bottom-3 lg:bottom-4 left-2 sm:left-3 lg:left-4 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-medium border border-white/10">
+                <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-indigo-500"></span>
+                <span className="hidden sm:inline">Participant {index}</span>
+                <span className="sm:hidden">P{index}</span>
+            </div>
+        </div>
+    );
+};
+
+export default VideoMeet;

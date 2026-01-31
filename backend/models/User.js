@@ -23,6 +23,12 @@ const userSchema = new mongoose.Schema({
     enum: ["member", "admin"],
     default: "member"
   },
+  resetPasswordToken: {
+    type: String
+  },
+  resetPasswordExpires: {
+    type: Date
+  },
   workspaces: [
     { type: mongoose.Schema.Types.ObjectId, ref: "Workspace" }
   ]

@@ -1,0 +1,20 @@
+# General
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Dependencies
+node_modules/
+dist/
+build/

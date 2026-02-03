@@ -38,7 +38,7 @@ const Dashboard = () => {
 
     const quickActions = [
         { icon: FileText, label: 'New Document', path: '/dashboard/documents', color: 'from-blue-500/20 to-cyan-500/20' },
-        { icon: Video, label: 'Start Meeting', path: '/dashboard/meetings', color: 'from-purple-500/20 to-pink-500/20' },
+        { icon: Video, label: 'Meeting', path: '/dashboard/meetings', color: 'from-purple-500/20 to-pink-500/20' },
         { icon: Layout, label: 'Whiteboard', path: '/dashboard/whiteboard', color: 'from-green-500/20 to-emerald-500/20' },
         { icon: CheckSquare, label: 'Tasks', path: '/dashboard/tasks', color: 'from-orange-500/20 to-red-500/20' },
     ];

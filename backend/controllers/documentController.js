@@ -1,7 +1,6 @@
 import Document from "../models/Document.js";
 import Workspace from "../models/Workspace.js";
 
-// Create a new document
 export const createDocument = async (req, res) => {
     try {
         const { title, workspaceId } = req.body;
@@ -9,8 +8,6 @@ export const createDocument = async (req, res) => {
         if (!title || !workspaceId) {
             return res.status(400).json({ error: "Title and workspace are required" });
         }
-
-        // Verify workspace access
         const workspace = await Workspace.findById(workspaceId);
         if (!workspace || !workspace.users.includes(req.user._id)) {
             return res.status(403).json({ error: "Access denied" });
@@ -28,13 +25,9 @@ export const createDocument = async (req, res) => {
         res.status(500).json({ error: "Server error" });
     }
 };
-
-// Get all documents in a workspace
 export const getDocuments = async (req, res) => {
     try {
         const { workspaceId } = req.params;
-
-        // Verify workspace access
         const workspace = await Workspace.findById(workspaceId);
         if (!workspace || !workspace.users.includes(req.user._id)) {
             return res.status(403).json({ error: "Access denied" });
@@ -50,8 +43,6 @@ export const getDocuments = async (req, res) => {
         res.status(500).json({ error: "Server error" });
     }
 };
-
-// Get single document
 export const getDocument = async (req, res) => {
     try {
         const document = await Document.findById(req.params.id)
@@ -61,8 +52,6 @@ export const getDocument = async (req, res) => {
         if (!document) {
             return res.status(404).json({ error: "Document not found" });
         }
-
-        // Verify access through workspace
         const workspace = await Workspace.findById(document.workspace._id);
         if (!workspace.users.includes(req.user._id)) {
             return res.status(403).json({ error: "Access denied" });
@@ -74,8 +63,6 @@ export const getDocument = async (req, res) => {
         res.status(500).json({ error: "Server error" });
     }
 };
-
-// Save document content
 export const saveDocument = async (req, res) => {
     try {
         const { content } = req.body;
@@ -95,8 +82,6 @@ export const saveDocument = async (req, res) => {
         res.status(500).json({ error: "Server error" });
     }
 };
-
-// Delete document
 export const deleteDocument = async (req, res) => {
     try {
         const document = await Document.findById(req.params.id);

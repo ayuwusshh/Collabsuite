@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, Users, Monitor, MonitorOff, MessageSquare, Send, X, Pin } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, Users, Monitor, MonitorOff, MessageSquare, Pin } from 'lucide-react';
 import Peer from 'simple-peer';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
+import MeetingSidePanel from '../components/MeetingSidePanel';
 
 const VideoMeet = () => {
     const { id } = useParams();
@@ -19,8 +20,6 @@ const VideoMeet = () => {
     const [copied, setCopied] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [showChat, setShowChat] = useState(false);
-    const [messages, setMessages] = useState([]);
-    const [currentMessage, setCurrentMessage] = useState('');
     const [pinnedPeer, setPinnedPeer] = useState(null); // 'self' or peerID
     const [isHost, setIsHost] = useState(false);
     const [hasAudioPermission, setHasAudioPermission] = useState(true);
@@ -32,7 +31,6 @@ const VideoMeet = () => {
     const socketRef = useRef();
     const peersRef = useRef([]); // To keep track for signaling without re-renders
     const screenStreamRef = useRef(null);
-    const chatEndRef = useRef();
 
     // Setup local media on mount
     useEffect(() => {
@@ -96,12 +94,28 @@ const VideoMeet = () => {
             }
         };
 
+        // Handle tab/window close
+        const handleBeforeUnload = () => {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+            if (screenStreamRef.current) {
+                screenStreamRef.current.getTracks().forEach(t => t.stop());
+            }
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+            }
+        };
+
         window.addEventListener('popstate', handlePopState);
+        window.addEventListener('beforeunload', handleBeforeUnload);
 
         return () => {
             if (stream) stream.getTracks().forEach(t => t.stop());
+            if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach(t => t.stop());
             if (socketRef.current) socketRef.current.disconnect();
             window.removeEventListener('popstate', handlePopState);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
         };
     }, []);
 
@@ -116,13 +130,6 @@ const VideoMeet = () => {
             }
         }
     }, [stream, isJoined, pinnedPeer]);
-
-    // Auto-scroll chat to bottom
-    useEffect(() => {
-        if (chatEndRef.current) {
-            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [messages]);
 
     const joinMeeting = () => {
         if (!stream) {
@@ -140,7 +147,7 @@ const VideoMeet = () => {
         const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
         socketRef.current = socket;
 
-        socket.emit('join-room', `meet_${id}`);
+        socket.emit('join-room', `meet_${id}`, user?.name || 'Anonymous');
 
         // Listen for host status
         socket.on('you-are-host', () => {
@@ -160,31 +167,40 @@ const VideoMeet = () => {
             navigate('/dashboard/meetings', { replace: true });
         });
 
-        socket.on('user-joined', (userId) => {
-            const peer = createPeer(userId, socket.id, stream);
-            peersRef.current.push({
-                peerID: userId,
-                peer,
-            });
-            setPeers(prev => {
-                const updated = [...prev, { peerID: userId, peer }];
-                console.log('📊 Setting peers state:', updated.length);
-                return updated;
-            });
+        socket.on('user-joined', (userInfo) => {
+            // We just log it and wait for their signal to initiate the connection
+            console.log('👤 Existing user: User joined', userInfo.name);
+            // We store their name in a temporary map if we need it
         });
 
-        socket.on('signal', ({ signal, from }) => {
+        socket.on('all-users', (users) => {
+            const peers = [];
+            users.forEach(userInfo => {
+                const peer = createPeer(userInfo.socketId, socket.id, stream); // Use createPeer for initial connection
+                peersRef.current.push({
+                    peerID: userInfo.socketId,
+                    peer,
+                    name: userInfo.name
+                });
+                peers.push({ peerID: userInfo.socketId, peer, name: userInfo.name });
+            });
+            setPeers(peers);
+        });
+
+        socket.on('signal', ({ signal, from, name }) => {
             const item = peersRef.current.find(p => p.peerID === from);
             if (item) {
                 item.peer.signal(signal);
             } else {
+                // If peer not found, this is an incoming call (we are the receiver)
                 const peer = addPeer(signal, from, stream);
                 peersRef.current.push({
                     peerID: from,
                     peer,
+                    name: name || 'Anonymous'
                 });
                 setPeers(prev => {
-                    const updated = [...prev, { peerID: from, peer }];
+                    const updated = [...prev, { peerID: from, peer, name: name || 'Anonymous' }];
                     return updated;
                 });
             }
@@ -201,11 +217,6 @@ const VideoMeet = () => {
             if (pinnedPeer === userId) {
                 setPinnedPeer(null);
             }
-        });
-
-        // Chat messages
-        socket.on('receive-message', (message) => {
-            setMessages(prev => [...prev, message]);
         });
     };
 
@@ -605,6 +616,7 @@ const VideoMeet = () => {
                                 <PeerVideo
                                     key={pinnedPeer}
                                     peer={peers.find(p => p.peerID === pinnedPeer)?.peer}
+                                    name={peers.find(p => p.peerID === pinnedPeer)?.name || 'Anonymous'}
                                     index={peers.findIndex(p => p.peerID === pinnedPeer) + 1}
                                     isPinned={true}
                                     onUnpin={() => setPinnedPeer(null)}
@@ -634,7 +646,7 @@ const VideoMeet = () => {
                                     className="relative aspect-video bg-slate-900/50 rounded-xl overflow-hidden border border-gray-700/30 cursor-pointer hover:border-blue-500/50 transition-all"
                                     onClick={() => setPinnedPeer(peer.peerID)}
                                 >
-                                    <PeerVideo peer={peer.peer} index={index + 1} isSmall={true} onPin={() => setPinnedPeer(peer.peerID)} />
+                                    <PeerVideo peer={peer.peer} name={peer.name || 'Anonymous'} index={index + 1} isSmall={true} onPin={() => setPinnedPeer(peer.peerID)} />
                                 </div>
                             ))}
                         </div>
@@ -688,6 +700,7 @@ const VideoMeet = () => {
                                 <PeerVideo
                                     key={peer.peerID}
                                     peer={peer.peer}
+                                    name={peer.name || 'Anonymous'}
                                     index={index + 1}
                                     onPin={() => setPinnedPeer(peer.peerID)}
                                 />
@@ -726,94 +739,30 @@ const VideoMeet = () => {
                     </button>
                 </div>
 
-                <div className="hidden md:flex items-center gap-2">
+                <div className="flex items-center gap-2">
                     <button
                         onClick={() => setShowChat(!showChat)}
-                        className={`p-3 rounded-xl transition-all shadow-lg relative ${showChat ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-700'}`}
-                        title="Toggle chat"
+                        className={`p-3 rounded-xl transition-all shadow-lg ${showChat ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-700'}`}
+                        title="Chat"
                     >
                         <MessageSquare className="w-5 h-5" />
-                        {messages.length > 0 && !showChat && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-bold">
-                                {messages.length > 9 ? '9+' : messages.length}
-                            </span>
-                        )}
                     </button>
                 </div>
             </div>
 
-            {/* Chat Panel */}
-            {showChat && (
-                <div className="absolute right-0 top-0 bottom-0 w-80 bg-[#1a2332]/95 backdrop-blur-xl border-l border-gray-700/50 flex flex-col shadow-2xl z-50">
-                    {/* Chat Header */}
-                    <div className="flex items-center justify-between p-4 border-b border-gray-700/50">
-                        <div className="flex items-center gap-2">
-                            <MessageSquare className="w-5 h-5 text-blue-400" />
-                            <h3 className="font-semibold text-white">Meeting Chat</h3>
-                        </div>
-                        <button
-                            onClick={() => setShowChat(false)}
-                            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-                        >
-                            <X className="w-5 h-5 text-gray-400" />
-                        </button>
-                    </div>
-
-                    {/* Messages */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                        {messages.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full text-center">
-                                <MessageSquare className="w-12 h-12 text-gray-600 mb-3" />
-                                <p className="text-sm text-gray-400">No messages yet</p>
-                                <p className="text-xs text-gray-500 mt-1">Start the conversation!</p>
-                            </div>
-                        ) : (
-                            messages.map((msg, idx) => (
-                                <div key={idx} className={`flex flex-col ${msg.sender === user?.name ? 'items-end' : 'items-start'}`}>
-                                    <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${msg.sender === user?.name
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-800/80 text-gray-100'
-                                        }`}>
-                                        {msg.sender !== user?.name && (
-                                            <p className="text-xs font-medium text-blue-400 mb-1">{msg.sender}</p>
-                                        )}
-                                        <p className="text-sm break-words">{msg.text}</p>
-                                    </div>
-                                    <p className="text-[10px] text-gray-500 mt-1 px-2">
-                                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
-                                </div>
-                            ))
-                        )}
-                        <div ref={chatEndRef} />
-                    </div>
-
-                    {/* Message Input */}
-                    <form onSubmit={sendMessage} className="p-4 border-t border-gray-700/50">
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={currentMessage}
-                                onChange={(e) => setCurrentMessage(e.target.value)}
-                                placeholder="Type a message..."
-                                className="flex-1 bg-gray-800/50 border border-gray-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!currentMessage.trim()}
-                                className="p-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all"
-                            >
-                                <Send className="w-5 h-5" />
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            )}
+            {/* Chat Side Panel */}
+            <MeetingSidePanel
+                socket={socketRef.current}
+                roomId={`meet_${id}`}
+                user={user}
+                onClose={() => setShowChat(false)}
+                isOpen={showChat}
+            />
         </div>
     );
 };
 
-const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUnpin }) => {
+const PeerVideo = ({ peer, name = 'Anonymous', index, isPinned = false, isSmall = false, onPin, onUnpin }) => {
     const [remoteStream, setRemoteStream] = useState(null);
     const videoRef = useCallback((node) => {
         if (node && remoteStream) {
@@ -869,12 +818,12 @@ const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUn
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
                         <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center">
-                            <span className="text-sm font-bold text-slate-400">P{index}</span>
+                            <span className="text-sm font-bold text-slate-400">{name.substring(0, 2).toUpperCase()}</span>
                         </div>
                     </div>
                 )}
                 <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/40 backdrop-blur-md rounded-lg text-[10px] font-medium">
-                    P{index}
+                    {name}
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Pin className="w-5 h-5" />
@@ -898,7 +847,7 @@ const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUn
                     <div className="w-full h-full flex items-center justify-center">
                         <div className="text-center">
                             <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3">
-                                <span className="text-4xl font-bold text-slate-400">P{index}</span>
+                                <span className="text-4xl font-bold text-slate-400">{name.substring(0, 2).toUpperCase()}</span>
                             </div>
                             <p className="text-sm text-slate-500">Connecting...</p>
                         </div>
@@ -907,7 +856,7 @@ const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUn
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <div className="absolute bottom-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-black/40 backdrop-blur-md rounded-xl text-xs font-medium border border-white/10">
                     <span className={`w-2 h-2 rounded-full ${remoteStream ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`}></span>
-                    Participant {index} (Pinned)
+                    {name} (Pinned)
                 </div>
                 {onUnpin && (
                     <button
@@ -939,7 +888,7 @@ const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUn
                 <div className="w-full h-full flex items-center justify-center">
                     <div className="text-center">
                         <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-2">
-                            <span className="text-2xl font-bold text-slate-400">P{index}</span>
+                            <span className="text-2xl font-bold text-slate-400">{name.substring(0, 2).toUpperCase()}</span>
                         </div>
                         <p className="text-xs text-slate-500">Connecting...</p>
                     </div>
@@ -948,8 +897,8 @@ const PeerVideo = ({ peer, index, isPinned = false, isSmall = false, onPin, onUn
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <div className="absolute bottom-2 sm:bottom-3 lg:bottom-4 left-2 sm:left-3 lg:left-4 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-medium border border-white/10">
                 <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${remoteStream ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`}></span>
-                <span className="hidden sm:inline">Participant {index}</span>
-                <span className="sm:hidden">P{index}</span>
+                <span className="hidden sm:inline">{name}</span>
+                <span className="sm:hidden">{name.substring(0, 10)}{name.length > 10 ? '...' : ''}</span>
             </div>
             {/* Pin indicator on hover */}
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">

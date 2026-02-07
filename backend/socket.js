@@ -8,7 +8,7 @@ const userInfo = {};
 export const initSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: process.env.CLIENT_URL || "http://localhost:5173",
+            origin: [process.env.CLIENT_URL || "http://localhost:5173", "http://localhost:5174"],
             methods: ["GET", "POST"],
             credentials: true
         }
@@ -75,9 +75,27 @@ export const initSocket = (server) => {
             socket.to(roomId).emit("task-updated", task);
         });
 
-        // Document sync
-        socket.on("sync-document", ({ roomId, content }) => {
-            socket.to(roomId).emit("receive-document", content);
+        // Document delta sync (Real-time collaborative editing)
+        socket.on("send-delta", ({ roomId, delta }) => {
+            // Broadcast the delta to everyone else in the room (except sender)
+            socket.to(roomId).emit("receive-delta", delta);
+        });
+
+        // Cursor tracking
+        socket.on("send-cursor", ({ roomId, range, userName }) => {
+            // Broadcast cursor position and user name
+            socket.to(roomId).emit("receive-cursor", {
+                range,
+                userName,
+                socketId: socket.id
+            });
+        });
+
+        // Join document specific room (optional if different from generic join-room, but good for tracking docs)
+        socket.on("join-document", (docId) => {
+            const roomId = `doc_${docId}`;
+            socket.join(roomId);
+            console.log(`Socket ${socket.id} joined document ${docId}`);
         });
 
         // Whiteboard sync

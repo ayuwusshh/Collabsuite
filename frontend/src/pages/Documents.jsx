@@ -47,10 +47,15 @@ const Documents = () => {
         }
     };
 
+    const [creating, setCreating] = useState(false);
+
     const handleCreateDocument = async (e) => {
         e.preventDefault();
+        if (!newDocTitle.trim()) return;
+
+        setCreating(true);
         try {
-            const response = await api.post('/documents', {
+            await api.post('/documents', {
                 title: newDocTitle,
                 workspaceId: selectedWorkspace
             });
@@ -59,6 +64,9 @@ const Documents = () => {
             fetchDocuments();
         } catch (error) {
             console.error('Create document error:', error);
+            alert(error.response?.data?.error || 'Failed to create document');
+        } finally {
+            setCreating(false);
         }
     };
 
@@ -158,16 +166,24 @@ const Documents = () => {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 px-4 py-2 bg-blue-600/90 hover:bg-blue-600 text-white text-sm rounded-lg transition-all"
+                                    disabled={creating || !newDocTitle.trim()}
+                                    className="flex-1 px-4 py-2 bg-blue-600/90 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-all flex items-center justify-center gap-2"
                                 >
-                                    Create
+                                    {creating ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                            <span>Creating...</span>
+                                        </>
+                                    ) : (
+                                        'Create'
+                                    )}
                                 </button>
                             </div>
                         </form>
                     </div>
-                </div>
+                </div >
             )}
-        </div>
+        </div >
     );
 };
 

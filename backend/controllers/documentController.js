@@ -9,7 +9,9 @@ export const createDocument = async (req, res) => {
             return res.status(400).json({ error: "Title and workspace are required" });
         }
         const workspace = await Workspace.findById(workspaceId);
-        if (!workspace || !workspace.users.includes(req.user._id)) {
+
+        const isMember = workspace?.users.some(u => u.user.toString() === req.user._id.toString());
+        if (!workspace || !isMember) {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -29,7 +31,9 @@ export const getDocuments = async (req, res) => {
     try {
         const { workspaceId } = req.params;
         const workspace = await Workspace.findById(workspaceId);
-        if (!workspace || !workspace.users.includes(req.user._id)) {
+
+        const isMember = workspace?.users.some(u => u.user.toString() === req.user._id.toString());
+        if (!workspace || !isMember) {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -53,7 +57,8 @@ export const getDocument = async (req, res) => {
             return res.status(404).json({ error: "Document not found" });
         }
         const workspace = await Workspace.findById(document.workspace._id);
-        if (!workspace.users.includes(req.user._id)) {
+        const isMember = workspace?.users.some(u => u.user.toString() === req.user._id.toString());
+        if (!isMember) {
             return res.status(403).json({ error: "Access denied" });
         }
 

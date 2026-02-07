@@ -1,5 +1,6 @@
 import Workspace from "../models/Workspace.js";
 import User from "../models/User.js";
+import { getIO } from "../socket.js";
 import Task from "../models/Task.js";
 import Document from "../models/Document.js";
 
@@ -136,6 +137,12 @@ export const deleteWorkspace = async (req, res) => {
             { workspaces: workspaceId },
             { $pull: { workspaces: workspaceId } }
         );
+
+        // Emit socket event to notify all members
+        const io = getIO();
+        workspace.users.forEach(member => {
+            io.to(`user_${member.user}`).emit('workspace-deleted', workspaceId);
+        });
 
         // Delete the workspace
         await workspace.deleteOne();

@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom';
 import { FileText, Video, Layout, CheckSquare, Plus, Clock, UserPlus, Trash2, LogOut } from 'lucide-react';
 import api from '../services/api';
 import AddMemberModal from '../components/AddMemberModal';
+import { useAuth } from '../context/AuthContext';
+import io from 'socket.io-client';
 
 const Dashboard = () => {
+    const { user } = useAuth();
     const [workspaces, setWorkspaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
@@ -12,13 +15,32 @@ const Dashboard = () => {
     const [selectedWorkspaceForMember, setSelectedWorkspaceForMember] = useState(null);
 
     useEffect(() => {
-        fetchWorkspaces();
+        if (user) {
+            fetchWorkspaces();
+        }
 
         const handleWorkspaceUpdate = () => fetchWorkspaces();
         window.addEventListener('workspace-updated', handleWorkspaceUpdate);
 
-        return () => window.removeEventListener('workspace-updated', handleWorkspaceUpdate);
-    }, []);
+        let socket;
+        if (user) {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            socket = io(API_URL);
+
+            socket.on('connect', () => {
+                socket.emit('join-room', `user_${user._id}`);
+            });
+
+            socket.on('workspace-deleted', (workspaceId) => {
+                setWorkspaces(prev => prev.filter(w => w._id !== workspaceId));
+            });
+        }
+
+        return () => {
+            window.removeEventListener('workspace-updated', handleWorkspaceUpdate);
+            if (socket) socket.disconnect();
+        };
+    }, [user]);
 
     const fetchWorkspaces = async () => {
         try {

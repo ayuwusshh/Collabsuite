@@ -14,59 +14,123 @@ const Documents = () => {
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [newDocTitle, setNewDocTitle] = useState('');
-    const { user } = useAuth(); // Get user
+    const [error, setError] = useState(null);
+    const { user } = useAuth();
     const socketRef = useRef(null);
+    const isMountedRef = useRef(true);
 
     useEffect(() => {
+        isMountedRef.current = true;
         fetchWorkspaces();
+        return () => {
+            isMountedRef.current = false;
+        };
     }, []);
 
     useEffect(() => {
-        if (selectedWorkspace) {
-            fetchDocuments();
+        if (!selectedWorkspace) return;
 
-            // Real-time updates
-            const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3000');
-            socketRef.current = socket;
+        let socket = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 3;
 
-            socket.on('connect', () => {
-                socket.emit('join-room', `workspace_${selectedWorkspace}`, user?.name);
-            });
-
-            socket.on('document-created', (newDoc) => {
-                setDocuments(prev => {
-                    if (prev.some(d => d._id === newDoc._id)) return prev;
-                    return [newDoc, ...prev];
+        const initSocket = () => {
+            try {
+                socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3000', {
+                    reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+                    reconnectionDelay: 1000,
+                    timeout: 10000
                 });
-            });
+                socketRef.current = socket;
 
-            return () => {
+                socket.on('connect', () => {
+                    if (isMountedRef.current) {
+                        socket.emit('join-room', `workspace_${selectedWorkspace}`, user?.name);
+                        setError(null);
+                    }
+                });
+
+                socket.on('connect_error', (err) => {
+                    console.error('Socket connection error:', err);
+                    reconnectAttempts++;
+                    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS && isMountedRef.current) {
+                        setError('Real-time updates unavailable. Please refresh.');
+                    }
+                });
+
+                socket.on('document-created', (newDoc) => {
+                    if (!isMountedRef.current || !newDoc?._id) return;
+                    setDocuments(prev => {
+                        if (prev.some(d => d._id === newDoc._id)) return prev;
+                        return [newDoc, ...prev];
+                    });
+                });
+            } catch (err) {
+                console.error('Socket initialization error:', err);
+                if (isMountedRef.current) {
+                    setError('Failed to connect to real-time updates');
+                }
+            }
+        };
+
+        fetchDocuments();
+        initSocket();
+
+        return () => {
+            if (socket) {
+                socket.off('connect');
+                socket.off('connect_error');
+                socket.off('document-created');
                 socket.disconnect();
-            };
-        }
+                socketRef.current = null;
+            }
+        };
     }, [selectedWorkspace, user?.name]);
 
     const fetchWorkspaces = async () => {
         try {
             const response = await api.get('/workspaces');
-            setWorkspaces(response.data);
-            if (!selectedWorkspace && response.data.length > 0) {
-                setSelectedWorkspace(response.data[0]._id);
+            if (!isMountedRef.current) return;
+
+            if (Array.isArray(response.data)) {
+                setWorkspaces(response.data);
+                if (!selectedWorkspace && response.data.length > 0) {
+                    setSelectedWorkspace(response.data[0]._id);
+                }
             }
         } catch (error) {
             console.error('Fetch workspaces error:', error);
+            if (isMountedRef.current) {
+                setError('Failed to load workspaces. Please refresh the page.');
+            }
         }
     };
 
     const fetchDocuments = async () => {
+        if (!selectedWorkspace) return;
+
         try {
             setLoading(true);
+            setError(null);
             const response = await api.get(`/documents/workspace/${selectedWorkspace}`);
-            setDocuments(response.data);
+
+            if (!isMountedRef.current) return;
+
+            if (Array.isArray(response.data)) {
+                setDocuments(response.data);
+            } else {
+                setDocuments([]);
+            }
         } catch (error) {
             console.error('Fetch documents error:', error);
+            if (isMountedRef.current) {
+                setError(error.response?.data?.error || 'Failed to load documents');
+                setDocuments([]);
+            }
         } finally {
-            setLoading(false);
+            if (isMountedRef.current) {
+                setLoading(false);
+            }
         }
     };
 
@@ -74,32 +138,54 @@ const Documents = () => {
 
     const handleCreateDocument = async (e) => {
         e.preventDefault();
-        if (!newDocTitle.trim()) return;
+        const trimmedTitle = newDocTitle.trim();
+
+        if (!trimmedTitle) return;
+        if (!selectedWorkspace) {
+            alert('Please select a workspace first');
+            return;
+        }
 
         setCreating(true);
         try {
             await api.post('/documents', {
-                title: newDocTitle,
+                title: trimmedTitle,
                 workspaceId: selectedWorkspace
             });
+
+            if (!isMountedRef.current) return;
+
             setNewDocTitle('');
             setShowCreate(false);
-            fetchDocuments();
+            await fetchDocuments();
         } catch (error) {
             console.error('Create document error:', error);
-            alert(error.response?.data?.error || 'Failed to create document');
+            if (isMountedRef.current) {
+                const errorMsg = error.response?.data?.error || 'Failed to create document. Please try again.';
+                alert(errorMsg);
+            }
         } finally {
-            setCreating(false);
+            if (isMountedRef.current) {
+                setCreating(false);
+            }
         }
     };
 
     return (
         <div className="space-y-5">
+            {error && (
+                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 flex items-center gap-2">
+                    <span className="text-red-400 text-sm">{error}</span>
+                    <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300">
+                        ×
+                    </button>
+                </div>
+            )}
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-semibold text-white">Documents</h1>
                 <button
                     onClick={() => setShowCreate(true)}
-                    disabled={!selectedWorkspace}
+                    disabled={!selectedWorkspace || creating}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/90 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-all"
                 >
                     <Plus className="w-4 h-4" />

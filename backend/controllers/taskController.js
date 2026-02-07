@@ -7,19 +7,32 @@ export const createTask = async (req, res) => {
     try {
         const { title, description, workspaceId, assignedTo, dueDate } = req.body;
 
-        if (!title || !workspaceId) {
-            return res.status(400).json({ error: "Title and workspace are required" });
+        // Input validation
+        if (!title || typeof title !== 'string' || !title.trim()) {
+            return res.status(400).json({ error: "Title is required and must be a non-empty string" });
         }
 
-        // Verify workspace access
+        if (!workspaceId || typeof workspaceId !== 'string') {
+            return res.status(400).json({ error: "Valid workspace ID is required" });
+        }
+
+        // Verify workspace exists and user has access
         const workspace = await Workspace.findById(workspaceId);
-        if (!workspace || !workspace.users.some(u => u.user.toString() === req.user._id.toString())) {
+        if (!workspace) {
+            return res.status(404).json({ error: "Workspace not found" });
+        }
+
+        if (!workspace.users || !workspace.users.some(u => u.user && u.user.toString() === req.user._id.toString())) {
             return res.status(403).json({ error: "Access denied" });
         }
 
+        // Sanitize and validate inputs
+        const sanitizedTitle = title.trim().substring(0, 200); // Limit title length
+        const sanitizedDescription = description ? String(description).trim().substring(0, 1000) : "";
+
         const task = await Task.create({
-            title,
-            description: description || "",
+            title: sanitizedTitle,
+            description: sanitizedDescription,
             workspace: workspaceId,
             createdBy: req.user._id,
             assignedTo: assignedTo || null,
@@ -27,12 +40,25 @@ export const createTask = async (req, res) => {
         });
 
         // Emit socket event for real-time updates
-        const io = getIO();
-        io.to(`workspace_${workspaceId}`).emit("task-created", task);
+        try {
+            const io = getIO();
+            if (io) {
+                io.to(`workspace_${workspaceId}`).emit("task-created", task);
+            }
+        } catch (socketError) {
+            console.error("Socket emit error:", socketError);
+            // Don't fail the request if socket fails
+        }
 
         res.status(201).json(task);
     } catch (error) {
         console.error("Create task error:", error);
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ error: error.message });
+        }
+        if (error.name === 'CastError') {
+            return res.status(400).json({ error: "Invalid ID format" });
+        }
         res.status(500).json({ error: "Server error" });
     }
 };
@@ -42,19 +68,32 @@ export const getTasks = async (req, res) => {
     try {
         const { workspaceId } = req.params;
 
-        // Verify workspace access
+        // Validate workspace ID
+        if (!workspaceId || typeof workspaceId !== 'string') {
+            return res.status(400).json({ error: "Valid workspace ID is required" });
+        }
+
+        // Verify workspace exists and user has access
         const workspace = await Workspace.findById(workspaceId);
-        if (!workspace || !workspace.users.some(u => u.user.toString() === req.user._id.toString())) {
+        if (!workspace) {
+            return res.status(404).json({ error: "Workspace not found" });
+        }
+
+        if (!workspace.users || !workspace.users.some(u => u.user && u.user.toString() === req.user._id.toString())) {
             return res.status(403).json({ error: "Access denied" });
         }
 
         const tasks = await Task.find({ workspace: workspaceId })
             .populate("assignedTo", "name email")
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean(); // Use lean() for better performance
 
-        res.json(tasks);
+        res.json(tasks || []);
     } catch (error) {
         console.error("Get tasks error:", error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ error: "Invalid workspace ID format" });
+        }
         res.status(500).json({ error: "Server error" });
     }
 };
@@ -63,15 +102,35 @@ export const getTasks = async (req, res) => {
 export const updateTaskStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        const task = await Task.findById(req.params.id);
+        const { id } = req.params;
 
+        // Validate inputs
+        if (!id || typeof id !== 'string') {
+            return res.status(400).json({ error: "Valid task ID is required" });
+        }
+
+        if (!status || typeof status !== 'string') {
+            return res.status(400).json({ error: "Status is required" });
+        }
+
+        // Validate status value
+        const validStatuses = ['todo', 'in_progress', 'done'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: "Invalid status value" });
+        }
+
+        const task = await Task.findById(id);
         if (!task) {
             return res.status(404).json({ error: "Task not found" });
         }
 
         // Verify workspace access
         const workspace = await Workspace.findById(task.workspace);
-        if (!workspace || !workspace.users.some(u => u.user.toString() === req.user._id.toString())) {
+        if (!workspace) {
+            return res.status(404).json({ error: "Workspace not found" });
+        }
+
+        if (!workspace.users || !workspace.users.some(u => u.user && u.user.toString() === req.user._id.toString())) {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -79,14 +138,27 @@ export const updateTaskStatus = async (req, res) => {
         await task.save();
 
         // Emit socket event for real-time updates
-        const io = getIO();
-        const workspaceId = task.workspace.toString();
-        console.log(`📡 Emitting task-status-updated to workspace_${workspaceId}`, { taskId: task._id, status });
-        io.to(`workspace_${workspaceId}`).emit("task-status-updated", task);
+        try {
+            const io = getIO();
+            const workspaceId = task.workspace.toString();
+            console.log(`📡 Emitting task-status-updated to workspace_${workspaceId}`, { taskId: task._id, status });
+            if (io) {
+                io.to(`workspace_${workspaceId}`).emit("task-status-updated", task);
+            }
+        } catch (socketError) {
+            console.error("Socket emit error:", socketError);
+            // Don't fail the request if socket fails
+        }
 
         res.json(task);
     } catch (error) {
         console.error("Update task status error:", error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ error: "Invalid ID format" });
+        }
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ error: error.message });
+        }
         res.status(500).json({ error: "Server error" });
     }
 };
@@ -117,15 +189,25 @@ export const updateTask = async (req, res) => {
 // Delete task
 export const deleteTask = async (req, res) => {
     try {
-        const task = await Task.findById(req.params.id);
+        const { id } = req.params;
 
+        // Validate ID
+        if (!id || typeof id !== 'string') {
+            return res.status(400).json({ error: "Valid task ID is required" });
+        }
+
+        const task = await Task.findById(id);
         if (!task) {
             return res.status(404).json({ error: "Task not found" });
         }
 
         // Verify workspace access
         const workspace = await Workspace.findById(task.workspace);
-        if (!workspace || !workspace.users.some(u => u.user.toString() === req.user._id.toString())) {
+        if (!workspace) {
+            return res.status(404).json({ error: "Workspace not found" });
+        }
+
+        if (!workspace.users || !workspace.users.some(u => u.user && u.user.toString() === req.user._id.toString())) {
             return res.status(403).json({ error: "Access denied" });
         }
 
@@ -135,13 +217,23 @@ export const deleteTask = async (req, res) => {
         await task.deleteOne();
 
         // Emit socket event for real-time updates
-        const io = getIO();
-        console.log(`🗑️ Emitting task-deleted to workspace_${workspaceId}`, { taskId });
-        io.to(`workspace_${workspaceId}`).emit("task-deleted", { taskId });
+        try {
+            const io = getIO();
+            console.log(`🗑️ Emitting task-deleted to workspace_${workspaceId}`, { taskId });
+            if (io) {
+                io.to(`workspace_${workspaceId}`).emit("task-deleted", { taskId });
+            }
+        } catch (socketError) {
+            console.error("Socket emit error:", socketError);
+            // Don't fail the request if socket fails
+        }
 
         res.json({ message: "Task deleted" });
     } catch (error) {
         console.error("Delete task error:", error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ error: "Invalid task ID format" });
+        }
         res.status(500).json({ error: "Server error" });
     }
 };

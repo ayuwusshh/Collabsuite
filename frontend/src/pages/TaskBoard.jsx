@@ -83,17 +83,31 @@ const TaskBoard = () => {
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [newTaskDescription, setNewTaskDescription] = useState('');
     const [socket, setSocket] = useState(null);
+    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
     const pendingOperationsRef = React.useRef(new Set());
+    const isMountedRef = React.useRef(true);
+    const socketReconnectTimeoutRef = React.useRef(null);
 
     const sensors = useSensors(useSensor(PointerSensor));
 
     useEffect(() => {
+        isMountedRef.current = true;
         fetchWorkspaces();
+        return () => {
+            isMountedRef.current = false;
+            if (socketReconnectTimeoutRef.current) {
+                clearTimeout(socketReconnectTimeoutRef.current);
+            }
+        };
     }, []);
 
     useEffect(() => {
         if (selectedWorkspace) {
-            fetchTasks();
+            setIsLoading(true);
+            fetchTasks().finally(() => {
+                if (isMountedRef.current) setIsLoading(false);
+            });
         }
     }, [selectedWorkspace]);
 
@@ -102,67 +116,125 @@ const TaskBoard = () => {
         if (!selectedWorkspace) return;
 
         const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-        const newSocket = io(API_URL);
-        setSocket(newSocket);
+        let newSocket = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 3;
 
-        // Join workspace room
-        console.log(`🔌 Joining workspace room: workspace_${selectedWorkspace}`);
-        newSocket.emit('join-room', `workspace_${selectedWorkspace}`);
+        try {
+            newSocket = io(API_URL, {
+                reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+                reconnectionDelay: 1000,
+                timeout: 10000
+            });
+            setSocket(newSocket);
 
-        // Listen for task updates from other users
-        newSocket.on('task-created', (newTask) => {
-            console.log('📥 Received task-created event:', newTask);
-            setTasks(prev => [...prev, newTask]);
-        });
+            newSocket.on('connect', () => {
+                console.log(`🔌 Joining workspace room: workspace_${selectedWorkspace}`);
+                newSocket.emit('join-room', `workspace_${selectedWorkspace}`);
+                if (isMountedRef.current) setError(null);
+            });
 
-        newSocket.on('task-status-updated', (updatedTask) => {
-            console.log('📥 Received task-status-updated event:', updatedTask);
-            // Ignore if this is our own operation
-            if (pendingOperationsRef.current.has(`status-${updatedTask._id}`)) {
-                console.log('⏭️ Ignoring own status update');
-                pendingOperationsRef.current.delete(`status-${updatedTask._id}`);
-                return;
+            newSocket.on('connect_error', (err) => {
+                console.error('Socket connection error:', err);
+                reconnectAttempts++;
+                if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS && isMountedRef.current) {
+                    setError('Real-time updates unavailable. Changes will sync when connection is restored.');
+                }
+            });
+
+            // Listen for task updates from other users
+            newSocket.on('task-created', (newTask) => {
+                if (!isMountedRef.current || !newTask?._id) return;
+                console.log('📥 Received task-created event:', newTask);
+                setTasks(prev => {
+                    if (prev.some(t => t._id === newTask._id)) return prev;
+                    return [...prev, newTask];
+                });
+            });
+
+            newSocket.on('task-status-updated', (updatedTask) => {
+                if (!isMountedRef.current || !updatedTask?._id) return;
+                console.log('📥 Received task-status-updated event:', updatedTask);
+                // Ignore if this is our own operation
+                if (pendingOperationsRef.current.has(`status-${updatedTask._id}`)) {
+                    console.log('⏭️ Ignoring own status update');
+                    pendingOperationsRef.current.delete(`status-${updatedTask._id}`);
+                    return;
+                }
+                setTasks(prev => prev.map(task =>
+                    task._id === updatedTask._id ? updatedTask : task
+                ));
+            });
+
+            newSocket.on('task-deleted', ({ taskId }) => {
+                if (!isMountedRef.current || !taskId) return;
+                console.log('📥 Received task-deleted event:', taskId);
+                // Ignore if this is our own operation
+                if (pendingOperationsRef.current.has(`delete-${taskId}`)) {
+                    console.log('⏭️ Ignoring own delete');
+                    pendingOperationsRef.current.delete(`delete-${taskId}`);
+                    return;
+                }
+                setTasks(prev => prev.filter(task => task._id !== taskId));
+            });
+        } catch (err) {
+            console.error('Socket initialization error:', err);
+            if (isMountedRef.current) {
+                setError('Failed to connect to real-time updates');
             }
-            setTasks(prev => prev.map(task =>
-                task._id === updatedTask._id ? updatedTask : task
-            ));
-        });
-
-        newSocket.on('task-deleted', ({ taskId }) => {
-            console.log('📥 Received task-deleted event:', taskId);
-            // Ignore if this is our own operation
-            if (pendingOperationsRef.current.has(`delete-${taskId}`)) {
-                console.log('⏭️ Ignoring own delete');
-                pendingOperationsRef.current.delete(`delete-${taskId}`);
-                return;
-            }
-            setTasks(prev => prev.filter(task => task._id !== taskId));
-        });
+        }
 
         return () => {
-            newSocket.emit('leave-room', `workspace_${selectedWorkspace}`);
-            newSocket.disconnect();
+            if (newSocket) {
+                newSocket.off('connect');
+                newSocket.off('connect_error');
+                newSocket.off('task-created');
+                newSocket.off('task-status-updated');
+                newSocket.off('task-deleted');
+                newSocket.emit('leave-room', `workspace_${selectedWorkspace}`);
+                newSocket.disconnect();
+            }
+            setSocket(null);
         };
     }, [selectedWorkspace]);
 
     const fetchWorkspaces = async () => {
         try {
             const response = await api.get('/workspaces');
-            setWorkspaces(response.data);
-            if (!selectedWorkspace && response.data.length > 0) {
-                setSelectedWorkspace(response.data[0]._id);
+            if (!isMountedRef.current) return;
+
+            if (Array.isArray(response.data)) {
+                setWorkspaces(response.data);
+                if (!selectedWorkspace && response.data.length > 0) {
+                    setSelectedWorkspace(response.data[0]._id);
+                }
             }
         } catch (error) {
             console.error('Fetch workspaces error:', error);
+            if (isMountedRef.current) {
+                setError('Failed to load workspaces. Please refresh.');
+            }
         }
     };
 
     const fetchTasks = async () => {
+        if (!selectedWorkspace) return;
+
         try {
             const response = await api.get(`/tasks/workspace/${selectedWorkspace}`);
-            setTasks(response.data);
+            if (!isMountedRef.current) return;
+
+            if (Array.isArray(response.data)) {
+                setTasks(response.data);
+            } else {
+                setTasks([]);
+            }
         } catch (error) {
             console.error('Fetch tasks error:', error);
+            if (isMountedRef.current) {
+                setError(error.response?.data?.error || 'Failed to load tasks');
+                setTasks([]);
+            }
         }
     };
 
@@ -187,19 +259,33 @@ const TaskBoard = () => {
 
     const handleCreateTask = async (e) => {
         e.preventDefault();
+        const trimmedTitle = newTaskTitle.trim();
+
+        if (!trimmedTitle) return;
+        if (!selectedWorkspace) {
+            alert('Please select a workspace first');
+            return;
+        }
+
         try {
             await api.post('/tasks', {
-                title: newTaskTitle,
-                description: newTaskDescription,
+                title: trimmedTitle,
+                description: newTaskDescription.trim(),
                 workspaceId: selectedWorkspace
             });
+
+            if (!isMountedRef.current) return;
+
             setNewTaskTitle('');
             setNewTaskDescription('');
             setShowCreate(false);
-            fetchTasks();
+            await fetchTasks();
         } catch (error) {
             console.error('Create task error:', error);
-            alert('Failed to create task. Please try again.');
+            if (isMountedRef.current) {
+                const errorMsg = error.response?.data?.error || 'Failed to create task. Please try again.';
+                alert(errorMsg);
+            }
         }
     };
 
@@ -210,25 +296,34 @@ const TaskBoard = () => {
         const activeTask = tasks.find(t => t._id === active.id);
         const newStatus = over.id; // The droppable id is the status
 
-        if (activeTask && newStatus && activeTask.status !== newStatus) {
-            // Mark this as a pending local operation
-            pendingOperationsRef.current.add(`status-${activeTask._id}`);
+        if (!activeTask || !newStatus || activeTask.status === newStatus) return;
 
-            // Optimistic update
-            const previousTasks = [...tasks];
-            setTasks(prev => prev.map(task =>
-                task._id === activeTask._id ? { ...task, status: newStatus } : task
-            ));
+        // Mark this as a pending local operation
+        const operationId = `status-${activeTask._id}`;
+        pendingOperationsRef.current.add(operationId);
 
-            try {
-                await api.patch(`/tasks/${activeTask._id}/status`, { status: newStatus });
-            } catch (error) {
-                console.error('Update task status error:', error);
-                // Remove from pending if failed
-                pendingOperationsRef.current.delete(`status-${activeTask._id}`);
+        // Optimistic update
+        const previousTasks = [...tasks];
+        setTasks(prev => prev.map(task =>
+            task._id === activeTask._id ? { ...task, status: newStatus } : task
+        ));
+
+        try {
+            await api.patch(`/tasks/${activeTask._id}/status`, { status: newStatus });
+            // Success - remove from pending after a delay to avoid race conditions
+            setTimeout(() => {
+                pendingOperationsRef.current.delete(operationId);
+            }, 500);
+        } catch (error) {
+            console.error('Update task status error:', error);
+            // Remove from pending immediately on error
+            pendingOperationsRef.current.delete(operationId);
+
+            if (isMountedRef.current) {
                 // Rollback on error
                 setTasks(previousTasks);
-                alert('Failed to update task status. Please try again.');
+                const errorMsg = error.response?.data?.error || 'Failed to update task status. Please try again.';
+                alert(errorMsg);
             }
         }
     };
@@ -239,12 +334,20 @@ const TaskBoard = () => {
 
     return (
         <div className="space-y-6">
+            {error && (
+                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 flex items-center gap-2">
+                    <span className="text-red-400 text-sm">{error}</span>
+                    <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300">
+                        ×
+                    </button>
+                </div>
+            )}
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold text-white">Task Board</h1>
                 <button
                     onClick={() => setShowCreate(true)}
-                    disabled={!selectedWorkspace}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 text-white rounded-lg transition-all"
+                    disabled={!selectedWorkspace || isLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-all"
                 >
                     <Plus className="w-4 h-4" />
                     <span>New Task</span>

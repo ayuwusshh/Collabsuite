@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Video, Layout, CheckSquare, Plus, Clock, UserPlus, Trash2, LogOut } from 'lucide-react';
+import { FileText, Video, Layout, CheckSquare, MessageCircle, Plus, Clock, UserPlus, Trash2, LogOut } from 'lucide-react';
 import api from '../services/api';
 import AddMemberModal from '../components/AddMemberModal';
 import { useAuth } from '../context/AuthContext';
@@ -109,6 +109,7 @@ const Dashboard = () => {
         { icon: Video, label: 'Meeting', path: '/dashboard/meetings', color: 'from-purple-500/20 to-pink-500/20' },
         { icon: Layout, label: 'Whiteboard', path: '/dashboard/whiteboard', color: 'from-green-500/20 to-emerald-500/20' },
         { icon: CheckSquare, label: 'Tasks', path: '/dashboard/tasks', color: 'from-orange-500/20 to-red-500/20' },
+        { icon: MessageCircle, label: 'Chat', path: '/dashboard/chat', color: 'from-yellow-500/20 to-amber-500/20' },
     ];
 
     if (loading) {
@@ -130,7 +131,7 @@ const Dashboard = () => {
             {/* Quick Actions */}
             <div>
                 <h2 className="text-base font-medium text-gray-300 mb-3">Quick Actions</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                     {quickActions.map((action) => (
                         <Link
                             key={action.path}

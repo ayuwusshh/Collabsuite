@@ -1,24 +1,41 @@
 import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema({
-  content: {
-    type: String,
-    required: true
-  },
-  workspace: {
+  conversation: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Workspace",
-    required: true
+    ref: "Conversation",
+    required: true,
+    index: true
   },
-  user: {
+  sender: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true
   },
-  timestamp: {
-    type: Date,
-    default: Date.now
+  content: {
+    type: String,
+    trim: true,
+    maxlength: 5000
+  },
+  readBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  }],
+  type: {
+    type: String,
+    enum: ['TEXT', 'SYSTEM', 'FILE'],
+    default: 'TEXT'
+  },
+  file: {
+    filename: String,        // Stored filename on server
+    originalName: String,    // Original filename from user
+    size: Number,           // File size in bytes
+    mimeType: String        // MIME type (e.g., 'image/png', 'application/pdf')
   }
 }, { timestamps: true });
+
+// Indexes for performance
+messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ sender: 1 });
 
 export default mongoose.model("Message", messageSchema);

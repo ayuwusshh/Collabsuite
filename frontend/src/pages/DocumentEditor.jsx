@@ -55,10 +55,10 @@ const DocumentEditor = () => {
                 const content = quillRef.current.root.innerHTML;
                 const token = localStorage.getItem('token'); // Assuming standard token storage
                 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const url = `${apiUrl}/documents/${id}`;
 
-                // Use fetch with keepalive for guaranteed delivery
-                // START FIX: Remove /api prefix to match backend routes
-                fetch(`${apiUrl}/documents/${id}`, {
+                // Strategy 1: Fetch with KeepAlive (Primary)
+                fetch(url, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -66,7 +66,8 @@ const DocumentEditor = () => {
                     },
                     body: JSON.stringify({ content }),
                     keepalive: true
-                }).catch(err => console.error('Exit save failed:', err));
+                }).then(() => console.log('Exit save (wrapperRef) successful!'))
+                    .catch(err => console.error('Exit save failed:', err));
             }
 
             quillRef.current = null;
@@ -151,8 +152,9 @@ const DocumentEditor = () => {
     useEffect(() => {
         if (editorReady && quillRef.current && documentData && !contentLoaded.current) {
             if (documentData.content) {
-                const delta = quillRef.current.clipboard.convert(documentData.content);
-                quillRef.current.setContents(delta, 'silent');
+                // Use dangerouslyPasteHTML for reliable HTML restoration in Quill 2.0
+                quillRef.current.clipboard.dangerouslyPasteHTML(0, documentData.content);
+                // Note: This triggers 'text-change' with source 'api', so it won't trigger auto-save.
             }
             contentLoaded.current = true;
             quillRef.current.focus();

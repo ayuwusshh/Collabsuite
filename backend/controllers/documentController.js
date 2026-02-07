@@ -1,5 +1,6 @@
 import Document from "../models/Document.js";
 import Workspace from "../models/Workspace.js";
+import { getIO } from "../socket.js";
 
 export const createDocument = async (req, res) => {
     try {
@@ -20,6 +21,13 @@ export const createDocument = async (req, res) => {
             workspace: workspaceId,
             lastEditedBy: req.user._id
         });
+
+        // Broadcast to workspace
+        try {
+            getIO().to(`workspace_${workspaceId}`).emit('document-created', document);
+        } catch (err) {
+            console.error("Socket emit error:", err);
+        }
 
         res.status(201).json(document);
     } catch (error) {

@@ -28,6 +28,7 @@ const DocumentEditor = () => {
     const socketRef = useRef(null);
     const quillRef = useRef(null);
     const cursorsRef = useRef(null);
+    const isDirty = useRef(false); // Track if we have unsaved changes
 
     // Constant colors for cursors
     const cursorColors = ['#F43F5E', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#6366F1'];
@@ -39,6 +40,7 @@ const DocumentEditor = () => {
             try {
                 await api.put(`/documents/${id}`, { content });
                 setSaveStatus('saved');
+                isDirty.current = false; // Mark as clean after save
             } catch (err) {
                 console.error('Auto-save error:', err);
                 setSaveStatus('error');
@@ -50,8 +52,8 @@ const DocumentEditor = () => {
     // Initialize Quill using a Callback Ref - The most robust way for React Strict Mode
     const wrapperRef = useCallback((wrapper) => {
         if (!wrapper) {
-            // Cleanup: Save immediately using Fetch KeepAlive (survives tab close)
-            if (quillRef.current) {
+            // Cleanup: Save immediately using Fetch KeepAlive ONLY if dirty
+            if (quillRef.current && isDirty.current) {
                 const content = quillRef.current.root.innerHTML;
                 const token = localStorage.getItem('token'); // Assuming standard token storage
                 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -131,6 +133,7 @@ const DocumentEditor = () => {
         editor.on('text-change', (delta, oldDelta, source) => {
             if (source === 'user') {
                 setSaveStatus('saving');
+                isDirty.current = true; // Mark as dirty
                 debouncedSave(editor.root.innerHTML);
 
                 if (socketRef.current?.connected) {
@@ -160,6 +163,33 @@ const DocumentEditor = () => {
             quillRef.current.focus();
         }
     }, [documentData, editorReady]);
+
+    // Handle Browser Close / Refresh specifically using 'beforeunload'
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            // Only save if dirty
+            if (quillRef.current && id && isDirty.current) {
+                const content = quillRef.current.root.innerHTML;
+                const token = localStorage.getItem('token');
+                const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const url = `${apiUrl}/documents/${id}`;
+
+                fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ content }),
+                    keepalive: true
+                }).then(() => console.log('Exit save (beforeunload) successful!'))
+                    .catch(err => console.error('Exit save failed during beforeunload:', err));
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [id]);
 
     // Initialize Socket & Fetch Data
     useEffect(() => {

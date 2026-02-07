@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { FileText, Plus, Clock, User } from 'lucide-react';
 import api from '../services/api';
+import { io } from 'socket.io-client';
+import { useAuth } from '../context/AuthContext'; // Import useAuth
 
 const Documents = () => {
     const [searchParams] = useSearchParams();
@@ -12,6 +14,8 @@ const Documents = () => {
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
     const [newDocTitle, setNewDocTitle] = useState('');
+    const { user } = useAuth(); // Get user
+    const socketRef = useRef(null);
 
     useEffect(() => {
         fetchWorkspaces();
@@ -20,8 +24,27 @@ const Documents = () => {
     useEffect(() => {
         if (selectedWorkspace) {
             fetchDocuments();
+
+            // Real-time updates
+            const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3000');
+            socketRef.current = socket;
+
+            socket.on('connect', () => {
+                socket.emit('join-room', `workspace_${selectedWorkspace}`, user?.name);
+            });
+
+            socket.on('document-created', (newDoc) => {
+                setDocuments(prev => {
+                    if (prev.some(d => d._id === newDoc._id)) return prev;
+                    return [newDoc, ...prev];
+                });
+            });
+
+            return () => {
+                socket.disconnect();
+            };
         }
-    }, [selectedWorkspace]);
+    }, [selectedWorkspace, user?.name]);
 
     const fetchWorkspaces = async () => {
         try {

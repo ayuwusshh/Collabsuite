@@ -6,7 +6,14 @@ const workspaceSchema = new mongoose.Schema({
     required: true
   },
   users: [
-    { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+    {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      role: {
+        type: String,
+        enum: ["owner", "admin", "member"],
+        default: "member"
+      }
+    }
   ]
 }, { timestamps: true });
 

@@ -1,24 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { DndContext, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, closestCorners, PointerSensor, useSensor, useSensors, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, GripVertical } from 'lucide-react';
+import { Plus, GripVertical, Trash2 } from 'lucide-react';
+import io from 'socket.io-client';
 import api from '../services/api';
 
-const TaskCard = ({ task }) => {
-    const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: task._id });
+const TaskCard = ({ task, onDelete }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task._id });
 
     const style = {
         transform: CSS.Transform.toString(transform),
         transition,
+        opacity: isDragging ? 0.5 : 1,
     };
 
     return (
         <div
             ref={setNodeRef}
             style={style}
-            className="bg-[#0B1220] border border-gray-700 rounded-lg p-4 mb-3 hover:border-gray-600 transition-colors"
+            className="bg-[#0B1220] border border-gray-700 rounded-lg p-4 mb-3 hover:border-gray-600 transition-colors group"
         >
             <div className="flex items-start gap-3">
                 <button {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing mt-1">
@@ -26,18 +28,36 @@ const TaskCard = ({ task }) => {
                 </button>
                 <div className="flex-1">
                     <h4 className="text-white font-medium mb-1">{task.title}</h4>
+                    {task.description && (
+                        <p className="text-sm text-gray-400 mb-2">{task.description}</p>
+                    )}
                     {task.dueDate && (
                         <p className="text-sm text-gray-400">Due: {new Date(task.dueDate).toLocaleDateString()}</p>
                     )}
                 </div>
+                <button
+                    onClick={() => onDelete(task._id)}
+                    className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all"
+                    title="Delete task"
+                >
+                    <Trash2 className="w-4 h-4" />
+                </button>
             </div>
         </div>
     );
 };
 
-const TaskColumn = ({ title, tasks, status }) => {
+const TaskColumn = ({ title, tasks, status, onDeleteTask }) => {
+    const { setNodeRef, isOver } = useDroppable({
+        id: status,
+    });
+
     return (
-        <div className="bg-[#1a2332]/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 min-h-[500px]">
+        <div
+            ref={setNodeRef}
+            className={`bg-[#1a2332]/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 min-h-[500px] transition-colors ${isOver ? 'border-blue-500 bg-blue-500/10' : ''
+                }`}
+        >
             <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-between">
                 {title}
                 <span className="text-sm text-gray-400 font-normal">({tasks.length})</span>
@@ -45,7 +65,7 @@ const TaskColumn = ({ title, tasks, status }) => {
             <SortableContext items={tasks.map(t => t._id)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-3">
                     {tasks.map((task) => (
-                        <TaskCard key={task._id} task={task} />
+                        <TaskCard key={task._id} task={task} onDelete={onDeleteTask} />
                     ))}
                 </div>
             </SortableContext>
@@ -61,6 +81,9 @@ const TaskBoard = () => {
     const [selectedWorkspace, setSelectedWorkspace] = useState(workspaceId || '');
     const [showCreate, setShowCreate] = useState(false);
     const [newTaskTitle, setNewTaskTitle] = useState('');
+    const [newTaskDescription, setNewTaskDescription] = useState('');
+    const [socket, setSocket] = useState(null);
+    const pendingOperationsRef = React.useRef(new Set());
 
     const sensors = useSensors(useSensor(PointerSensor));
 
@@ -72,6 +95,54 @@ const TaskBoard = () => {
         if (selectedWorkspace) {
             fetchTasks();
         }
+    }, [selectedWorkspace]);
+
+    // Socket connection for real-time updates
+    useEffect(() => {
+        if (!selectedWorkspace) return;
+
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const newSocket = io(API_URL);
+        setSocket(newSocket);
+
+        // Join workspace room
+        console.log(`🔌 Joining workspace room: workspace_${selectedWorkspace}`);
+        newSocket.emit('join-room', `workspace_${selectedWorkspace}`);
+
+        // Listen for task updates from other users
+        newSocket.on('task-created', (newTask) => {
+            console.log('📥 Received task-created event:', newTask);
+            setTasks(prev => [...prev, newTask]);
+        });
+
+        newSocket.on('task-status-updated', (updatedTask) => {
+            console.log('📥 Received task-status-updated event:', updatedTask);
+            // Ignore if this is our own operation
+            if (pendingOperationsRef.current.has(`status-${updatedTask._id}`)) {
+                console.log('⏭️ Ignoring own status update');
+                pendingOperationsRef.current.delete(`status-${updatedTask._id}`);
+                return;
+            }
+            setTasks(prev => prev.map(task =>
+                task._id === updatedTask._id ? updatedTask : task
+            ));
+        });
+
+        newSocket.on('task-deleted', ({ taskId }) => {
+            console.log('📥 Received task-deleted event:', taskId);
+            // Ignore if this is our own operation
+            if (pendingOperationsRef.current.has(`delete-${taskId}`)) {
+                console.log('⏭️ Ignoring own delete');
+                pendingOperationsRef.current.delete(`delete-${taskId}`);
+                return;
+            }
+            setTasks(prev => prev.filter(task => task._id !== taskId));
+        });
+
+        return () => {
+            newSocket.emit('leave-room', `workspace_${selectedWorkspace}`);
+            newSocket.disconnect();
+        };
     }, [selectedWorkspace]);
 
     const fetchWorkspaces = async () => {
@@ -95,18 +166,40 @@ const TaskBoard = () => {
         }
     };
 
+    const handleDeleteTask = async (taskId) => {
+        if (!window.confirm('Are you sure you want to delete this task?')) {
+            return;
+        }
+
+        // Mark this as a pending local operation
+        pendingOperationsRef.current.add(`delete-${taskId}`);
+
+        try {
+            await api.delete(`/tasks/${taskId}`);
+            setTasks(prev => prev.filter(task => task._id !== taskId));
+        } catch (error) {
+            console.error('Delete task error:', error);
+            // Remove from pending if failed
+            pendingOperationsRef.current.delete(`delete-${taskId}`);
+            alert('Failed to delete task. Please try again.');
+        }
+    };
+
     const handleCreateTask = async (e) => {
         e.preventDefault();
         try {
             await api.post('/tasks', {
                 title: newTaskTitle,
+                description: newTaskDescription,
                 workspaceId: selectedWorkspace
             });
             setNewTaskTitle('');
+            setNewTaskDescription('');
             setShowCreate(false);
             fetchTasks();
         } catch (error) {
             console.error('Create task error:', error);
+            alert('Failed to create task. Please try again.');
         }
     };
 
@@ -115,20 +208,33 @@ const TaskBoard = () => {
         if (!over) return;
 
         const activeTask = tasks.find(t => t._id === active.id);
-        const overColumn = over.id.split('-')[0]; // Extract status from droppable id
+        const newStatus = over.id; // The droppable id is the status
 
-        if (activeTask && overColumn && activeTask.status !== overColumn) {
+        if (activeTask && newStatus && activeTask.status !== newStatus) {
+            // Mark this as a pending local operation
+            pendingOperationsRef.current.add(`status-${activeTask._id}`);
+
+            // Optimistic update
+            const previousTasks = [...tasks];
+            setTasks(prev => prev.map(task =>
+                task._id === activeTask._id ? { ...task, status: newStatus } : task
+            ));
+
             try {
-                await api.patch(`/tasks/${activeTask._id}/status`, { status: overColumn });
-                fetchTasks();
+                await api.patch(`/tasks/${activeTask._id}/status`, { status: newStatus });
             } catch (error) {
                 console.error('Update task status error:', error);
+                // Remove from pending if failed
+                pendingOperationsRef.current.delete(`status-${activeTask._id}`);
+                // Rollback on error
+                setTasks(previousTasks);
+                alert('Failed to update task status. Please try again.');
             }
         }
     };
 
     const todoTasks = tasks.filter(t => t.status === 'todo');
-    const inProgressTasks = tasks.filter(t => t.status === 'in-progress');
+    const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
     const doneTasks = tasks.filter(t => t.status === 'done');
 
     return (
@@ -159,9 +265,9 @@ const TaskBoard = () => {
 
             <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <TaskColumn title="To Do" tasks={todoTasks} status="todo" />
-                    <TaskColumn title="In Progress" tasks={inProgressTasks} status="in-progress" />
-                    <TaskColumn title="Done" tasks={doneTasks} status="done" />
+                    <TaskColumn title="To Do" tasks={todoTasks} status="todo" onDeleteTask={handleDeleteTask} />
+                    <TaskColumn title="In Progress" tasks={inProgressTasks} status="in_progress" onDeleteTask={handleDeleteTask} />
+                    <TaskColumn title="Done" tasks={doneTasks} status="done" onDeleteTask={handleDeleteTask} />
                 </div>
             </DndContext>
 
@@ -176,6 +282,13 @@ const TaskBoard = () => {
                                 onChange={(e) => setNewTaskTitle(e.target.value)}
                                 placeholder="Task title"
                                 required
+                                className="w-full bg-[#0B1220] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                            />
+                            <textarea
+                                value={newTaskDescription}
+                                onChange={(e) => setNewTaskDescription(e.target.value)}
+                                placeholder="Task description (optional)"
+                                rows="3"
                                 className="w-full bg-[#0B1220] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
                             />
                             <div className="flex gap-3">

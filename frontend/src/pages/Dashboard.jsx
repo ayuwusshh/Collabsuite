@@ -1,16 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Video, Layout, CheckSquare, Plus, Clock } from 'lucide-react';
+import { FileText, Video, Layout, CheckSquare, Plus, Clock, UserPlus, Trash2, LogOut } from 'lucide-react';
 import api from '../services/api';
+import AddMemberModal from '../components/AddMemberModal';
 
 const Dashboard = () => {
     const [workspaces, setWorkspaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
     const [workspaceName, setWorkspaceName] = useState('');
+    const [selectedWorkspaceForMember, setSelectedWorkspaceForMember] = useState(null);
 
     useEffect(() => {
         fetchWorkspaces();
+
+        const handleWorkspaceUpdate = () => fetchWorkspaces();
+        window.addEventListener('workspace-updated', handleWorkspaceUpdate);
+
+        return () => window.removeEventListener('workspace-updated', handleWorkspaceUpdate);
     }, []);
 
     const fetchWorkspaces = async () => {
@@ -33,6 +40,45 @@ const Dashboard = () => {
             fetchWorkspaces();
         } catch (error) {
             console.error('Create workspace error:', error);
+            alert('Failed to create workspace. Please try again.');
+        }
+    };
+
+    const handleDeleteWorkspace = async (workspaceId, workspaceName) => {
+        if (!window.confirm(`Are you sure you want to delete "${workspaceName}"? This will delete all tasks and documents in this workspace.`)) {
+            return;
+        }
+
+        // Optimistic update
+        setWorkspaces(prev => prev.filter(w => w._id !== workspaceId));
+
+        try {
+            await api.delete(`/workspaces/${workspaceId}`);
+            // No need to fetchWorkspaces() if successful, as it's already removed locally
+        } catch (error) {
+            console.error('Delete workspace error:', error);
+            const errorMsg = error.response?.data?.error || 'Failed to delete workspace';
+            alert(errorMsg);
+            fetchWorkspaces(); // Revert/fetch on error
+        }
+    };
+
+    const handleLeaveWorkspace = async (workspaceId, workspaceName) => {
+        if (!window.confirm(`Are you sure you want to leave "${workspaceName}"?`)) {
+            return;
+        }
+
+        // Optimistic update
+        setWorkspaces(prev => prev.filter(w => w._id !== workspaceId));
+
+        try {
+            await api.post(`/workspaces/${workspaceId}/leave`);
+            // No need to fetchWorkspaces() if successful
+        } catch (error) {
+            console.error('Leave workspace error:', error);
+            const errorMsg = error.response?.data?.error || 'Failed to leave workspace';
+            alert(errorMsg);
+            fetchWorkspaces(); // Revert/fetch on error
         }
     };
 
@@ -105,9 +151,44 @@ const Dashboard = () => {
                         {workspaces.map((workspace) => (
                             <div
                                 key={workspace._id}
-                                className="bg-[#1a2332]/40 backdrop-blur-sm border border-gray-700/40 rounded-xl p-5 hover:border-gray-600/60 hover:bg-[#1a2332]/60 transition-all"
+                                className="bg-[#1a2332]/40 backdrop-blur-sm border border-gray-700/40 rounded-xl p-5 hover:border-gray-600/60 hover:bg-[#1a2332]/60 transition-all group"
                             >
-                                <h3 className="text-base font-medium text-white mb-1.5">{workspace.name}</h3>
+                                <div className="flex items-start justify-between mb-2">
+                                    <div className="flex-1">
+                                        <h3 className="text-base font-medium text-white">{workspace.name}</h3>
+                                        {workspace.userRole && (
+                                            <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded-full bg-blue-600/20 text-blue-400 border border-blue-600/30">
+                                                {workspace.userRole}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setSelectedWorkspaceForMember(workspace)}
+                                            className="text-gray-400 hover:text-blue-400 transition-colors"
+                                            title="Add member"
+                                        >
+                                            <UserPlus className="w-4 h-4" />
+                                        </button>
+                                        {workspace.userRole === 'owner' ? (
+                                            <button
+                                                onClick={() => handleDeleteWorkspace(workspace._id, workspace.name)}
+                                                className="text-gray-400 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                                title="Delete workspace"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => handleLeaveWorkspace(workspace._id, workspace.name)}
+                                                className="text-gray-400 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                                title="Leave workspace"
+                                            >
+                                                <LogOut className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
                                 <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3">
                                     <Clock className="w-3.5 h-3.5" />
                                     <span>Created {new Date(workspace.createdAt).toLocaleDateString()}</span>
@@ -164,6 +245,17 @@ const Dashboard = () => {
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* Add Member Modal */}
+            {selectedWorkspaceForMember && (
+                <AddMemberModal
+                    workspace={selectedWorkspaceForMember}
+                    onClose={() => setSelectedWorkspaceForMember(null)}
+                    onMemberAdded={() => {
+                        fetchWorkspaces();
+                    }}
+                />
             )}
         </div>
     );

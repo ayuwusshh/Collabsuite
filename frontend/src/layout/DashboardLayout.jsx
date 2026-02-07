@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, Outlet } from 'react-router-dom';
+import Notifications from '../components/Notifications';
 import {
     FileText,
     Video,
@@ -91,7 +92,7 @@ const DashboardLayout = () => {
             {/* Main Content */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Top Header */}
-                <header className="bg-[#0B1220]/60 backdrop-blur-sm border-b border-gray-700/50 px-6 py-4">
+                <header className="bg-[#0B1220]/60 backdrop-blur-sm border-b border-gray-700/50 px-6 py-4 relative z-20">
                     <div className="flex items-center justify-between">
                         <button
                             onClick={() => setSidebarOpen(true)}
@@ -99,8 +100,10 @@ const DashboardLayout = () => {
                         >
                             <Menu className="w-6 h-6" />
                         </button>
-                        <div className="flex-1 lg:flex-none">
-                            <h2 className="text-xl font-semibold text-white">Welcome back, {user?.name || 'User'}!</h2>
+                        <div className="flex-1 flex items-center justify-end gap-4 ml-auto">
+                            <Notifications />
+                            <h2 className="text-lg lg:text-xl font-semibold text-white truncate hidden md:block">Welcome back, {user?.name || 'User'}!</h2>
+                            <h2 className="text-lg font-semibold text-white truncate md:hidden">{user?.name || 'User'}</h2>
                         </div>
                     </div>
                 </header>

@@ -9,6 +9,7 @@ import workspace from './routes/workspace.js';
 import documents from './routes/documents.js';
 import tasks from './routes/tasks.js';
 import meetings from './routes/meetings.js';
+import invitations from './routes/invitation.js';
 import { initSocket } from './socket.js';
 
 dotenv.config();
@@ -35,6 +36,7 @@ app.use('/workspaces', workspace);
 app.use('/documents', documents);
 app.use('/tasks', tasks);
 app.use('/meetings', meetings);
+app.use('/invitations', invitations);
 
 app.get('/', (req, res) => {
   res.send("Server is running...");

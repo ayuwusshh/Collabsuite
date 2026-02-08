@@ -4,6 +4,7 @@ import { Send, MessageSquare, Plus, Users, Search, X, Mail, MoreVertical, Trash,
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import '../styles/chat-scroll.css';
 import NewChatModal from '../components/NewChatModal';
 
 const Chat = () => {
@@ -24,6 +25,7 @@ const Chat = () => {
     const [isChatListVisible, setIsChatListVisible] = useState(true);
     const socketRef = useRef(null);
     const messagesEndRef = useRef(null);
+    const messagesContainerRef = useRef(null);
     const isMountedRef = useRef(true);
     const fileInputRef = useRef(null);
     const settingsMenuRef = useRef(null);
@@ -453,7 +455,7 @@ const Chat = () => {
     }
 
     return (
-        <div className="absolute inset-0 -mt-6 -mx-6 flex gap-4 relative p-6">
+        <div className="h-full flex gap-4 relative">
             {/* Back Button - Mobile Only (when conversation selected) */}
             {selectedConversation && (
                 <button
@@ -504,7 +506,7 @@ const Chat = () => {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto min-h-0">
                     {filteredConversations.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-center p-4">
                             <MessageSquare className="w-12 h-12 text-gray-600 mb-2" />
@@ -569,11 +571,12 @@ const Chat = () => {
             {/* Messages Area */}
             <div className={`
                 flex-1 
-                ${selectedConversation ? 'block' : 'hidden'} sm:block
+                ${selectedConversation ? 'flex' : 'hidden'} sm:flex
                 bg-[#1a2332]/40 backdrop-blur-sm border border-gray-700/40 rounded-xl 
-                flex flex-col
+                flex-col
                 overflow-hidden
-                h-full
+                min-h-0
+                max-h-full
             `}>
                 {error && (
                     <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 m-4 flex items-center gap-2">
@@ -586,7 +589,7 @@ const Chat = () => {
 
                 {selectedConversation ? (
                     <>
-                        <div className="p-4 border-b border-gray-700/40">
+                        <div className="flex-shrink-0 p-4 border-b border-gray-700/40">
                             <div className="flex items-center justify-between">
                                 <div>
                                     <h2 className="text-lg font-semibold text-white">
@@ -662,7 +665,10 @@ const Chat = () => {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-6">
+                        <div
+                            ref={messagesContainerRef}
+                            className="flex-1 overflow-y-auto p-6 min-h-0 smooth-scroll"
+                        >
                             {messages.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-full text-center">
                                     <MessageSquare className="w-16 h-16 text-gray-600 mb-4" />
@@ -677,9 +683,9 @@ const Chat = () => {
                                                 key={message._id}
                                                 className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} group`}
                                             >
-                                                <div className="relative">
+                                                <div className="relative max-w-[85%] sm:max-w-[75%] lg:max-w-[60%]">
                                                     <div
-                                                        className={`max-w-[70%] ${isOwnMessage
+                                                        className={`${isOwnMessage
                                                             ? 'bg-gradient-to-r from-blue-600 to-purple-600'
                                                             : 'bg-[#0B1220]'
                                                             } rounded-lg p-4`}
@@ -770,7 +776,7 @@ const Chat = () => {
                             )}
                         </div>
 
-                        <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/40">
+                        <form onSubmit={handleSendMessage} className="flex-shrink-0 p-4 border-t border-gray-700/40">
                             {/* File preview */}
                             {selectedFile && (
                                 <div className="mb-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center gap-3">

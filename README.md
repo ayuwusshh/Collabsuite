@@ -52,6 +52,9 @@ CollabSuite is an all-in-one remote work collaboration platform that brings toge
 - Direct messages and group conversations
 - File sharing (images, documents, PDFs, spreadsheets, archives)
 - Message file attachments with preview
+- **Smooth scrolling** with custom scrollbar for seamless navigation
+- **Touchpad and mousewheel support** for natural scrolling
+- **Fixed header and input** - group name stays at top, input at bottom
 - **Unsend messages** within 15 minutes
 - **Delete conversations** from your view without affecting others
 - Online status indicators
@@ -59,6 +62,7 @@ CollabSuite is an all-in-one remote work collaboration platform that brings toge
 - Responsive chat interface optimized for all screen sizes
 - Image preview and download
 - File type indicators and size display
+
 
 ### 🎥 **Video Conferencing**
 - WebRTC-based peer-to-peer video calls
@@ -312,6 +316,9 @@ remote-work-colaborative-suite/
 │   │   │
 │   │   ├── services/             # API services
 │   │   │   └── api.js            # Axios configuration
+│   │   │
+│   │   ├── styles/               # Custom styles
+│   │   │   └── chat-scroll.css   # Chat scrollbar styles
 │   │   │
 │   │   ├── ui/                   # UI components (Navbar, etc.)
 │   │   ├── utils/                # Utility functions

@@ -15,6 +15,7 @@
     "@tailwindcss/vite": "^4.1.13",
     "axios": "^1.7.9",
     "html2pdf.js": "^0.14.0",
+    "locomotive-scroll": "^5.0.1",
     "lodash": "^4.17.23",
     "lucide-react": "^0.544.0",
     "quill": "^2.0.3",

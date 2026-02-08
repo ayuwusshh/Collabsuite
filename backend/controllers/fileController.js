@@ -44,7 +44,8 @@ export const uploadFile = async (req, res) => {
                 filename: req.file.filename,
                 originalName: req.file.originalname,
                 size: req.file.size,
-                mimeType: req.file.mimetype
+                mimeType: req.file.mimetype,
+                url: req.file.path // Cloudinary URL from multer-storage-cloudinary
             }
         });
 
@@ -98,14 +99,18 @@ export const downloadFile = async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        // Send file
-        const filePath = path.join(__dirname, '../uploads', message.file.filename);
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: 'File not found on server' });
+        // Redirect to Cloudinary URL
+        if (message.file && message.file.url) {
+            return res.redirect(message.file.url);
         }
 
-        res.download(filePath, message.file.originalName);
+        // Fallback for older files (if any exist locally)
+        const filePath = path.join(__dirname, '../uploads', message.file.filename);
+        if (fs.existsSync(filePath)) {
+            return res.download(filePath, message.file.originalName);
+        }
+
+        return res.status(404).json({ error: 'File not found' });
     } catch (error) {
         console.error('Download file error:', error);
         res.status(500).json({ error: 'Server error' });

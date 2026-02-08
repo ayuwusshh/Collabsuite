@@ -30,7 +30,8 @@ const messageSchema = new mongoose.Schema({
     filename: String,        // Stored filename on server
     originalName: String,    // Original filename from user
     size: Number,           // File size in bytes
-    mimeType: String        // MIME type (e.g., 'image/png', 'application/pdf')
+    mimeType: String,       // MIME type (e.g., 'image/png', 'application/pdf')
+    url: String             // Cloudinary secure URL
   }
 }, { timestamps: true });
 

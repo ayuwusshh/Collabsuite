@@ -699,16 +699,13 @@ const Chat = () => {
                                                             <div className="space-y-2">
                                                                 {/* Image preview first if it's an image */}
                                                                 {message.file?.mimeType?.startsWith('image/') && (
-                                                                    <div className="relative group">
+                                                                    <div className="relative">
                                                                         <img
                                                                             src={`http://localhost:5000/api/conversations/files/${message._id}`}
                                                                             alt=""
                                                                             className="max-w-sm rounded-xl shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
                                                                             onClick={() => handleDownloadFile(message._id, message.file?.originalName)}
                                                                         />
-                                                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-xl transition-colors flex items-center justify-center">
-                                                                            <Download className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
-                                                                        </div>
                                                                     </div>
                                                                 )}
 

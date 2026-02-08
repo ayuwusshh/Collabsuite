@@ -55,15 +55,15 @@ const TaskColumn = ({ title, tasks, status, onDeleteTask }) => {
     return (
         <div
             ref={setNodeRef}
-            className={`bg-[#1a2332]/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 min-h-[500px] transition-colors ${isOver ? 'border-blue-500 bg-blue-500/10' : ''
+            className={`bg-[#1a2332]/50 backdrop-blur-sm border border-gray-700/50 rounded-xl p-4 flex flex-col transition-colors ${isOver ? 'border-blue-500 bg-blue-500/10' : ''
                 }`}
         >
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-between flex-shrink-0">
                 {title}
                 <span className="text-sm text-gray-400 font-normal">({tasks.length})</span>
             </h3>
             <SortableContext items={tasks.map(t => t._id)} strategy={verticalListSortingStrategy}>
-                <div className="space-y-3">
+                <div className="space-y-3 overflow-y-auto flex-1 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
                     {tasks.map((task) => (
                         <TaskCard key={task._id} task={task} onDelete={onDeleteTask} />
                     ))}
@@ -294,9 +294,35 @@ const TaskBoard = () => {
         if (!over) return;
 
         const activeTask = tasks.find(t => t._id === active.id);
-        const newStatus = over.id; // The droppable id is the status
 
-        if (!activeTask || !newStatus || activeTask.status === newStatus) return;
+        // Determine the new status
+        // over.id can be either a column status ("todo", "in_progress", "done")
+        // or a task ID if dropped on top of another task
+        let newStatus;
+        const validStatuses = ['todo', 'in_progress', 'done'];
+
+        if (validStatuses.includes(over.id)) {
+            // Dropped directly on column
+            newStatus = over.id;
+        } else {
+            // Dropped on top of another task - find that task's status
+            const targetTask = tasks.find(t => t._id === over.id);
+            newStatus = targetTask?.status;
+        }
+
+        console.log('🔄 Drag end event:', {
+            activeId: active.id,
+            overId: over.id,
+            activeTask: activeTask,
+            newStatus: newStatus,
+            currentStatus: activeTask?.status,
+            isDroppedOnTask: !validStatuses.includes(over.id)
+        });
+
+        if (!activeTask || !newStatus || activeTask.status === newStatus) {
+            console.log('⏭️ Skipping update - no change or invalid task');
+            return;
+        }
 
         // Mark this as a pending local operation
         const operationId = `status-${activeTask._id}`;
@@ -309,13 +335,16 @@ const TaskBoard = () => {
         ));
 
         try {
+            console.log(`📤 Sending PATCH request to /tasks/${activeTask._id}/status with status:`, newStatus);
             await api.patch(`/tasks/${activeTask._id}/status`, { status: newStatus });
+            console.log('✅ Status update successful');
             // Success - remove from pending after a delay to avoid race conditions
             setTimeout(() => {
                 pendingOperationsRef.current.delete(operationId);
             }, 500);
         } catch (error) {
-            console.error('Update task status error:', error);
+            console.error('❌ Update task status error:', error);
+            console.error('Error response:', error.response?.data);
             // Remove from pending immediately on error
             pendingOperationsRef.current.delete(operationId);
 
@@ -367,7 +396,7 @@ const TaskBoard = () => {
             )}
 
             <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-280px)] md:h-auto md:min-h-[500px]">
                     <TaskColumn title="To Do" tasks={todoTasks} status="todo" onDeleteTask={handleDeleteTask} />
                     <TaskColumn title="In Progress" tasks={inProgressTasks} status="in_progress" onDeleteTask={handleDeleteTask} />
                     <TaskColumn title="Done" tasks={doneTasks} status="done" onDeleteTask={handleDeleteTask} />

@@ -104,38 +104,48 @@ export const updateTaskStatus = async (req, res) => {
         const { status } = req.body;
         const { id } = req.params;
 
+        console.log('📥 Received status update request:', { id, status, body: req.body, params: req.params });
+
         // Validate inputs
         if (!id || typeof id !== 'string') {
+            console.log('❌ Validation failed: Invalid task ID');
             return res.status(400).json({ error: "Valid task ID is required" });
         }
 
         if (!status || typeof status !== 'string') {
-            return res.status(400).json({ error: "Status is required" });
+            console.log('❌ Validation failed: Invalid status type', { status, type: typeof status });
+            return res.status(400).json({ error: "Status is required and must be a string" });
         }
 
         // Validate status value
         const validStatuses = ['todo', 'in_progress', 'done'];
         if (!validStatuses.includes(status)) {
-            return res.status(400).json({ error: "Invalid status value" });
+            console.log('❌ Validation failed: Invalid status value', { status, validStatuses });
+            return res.status(400).json({ error: `Invalid status value. Must be one of: ${validStatuses.join(', ')}` });
         }
 
         const task = await Task.findById(id);
         if (!task) {
+            console.log('❌ Task not found:', id);
             return res.status(404).json({ error: "Task not found" });
         }
 
         // Verify workspace access
         const workspace = await Workspace.findById(task.workspace);
         if (!workspace) {
+            console.log('❌ Workspace not found:', task.workspace);
             return res.status(404).json({ error: "Workspace not found" });
         }
 
         if (!workspace.users || !workspace.users.some(u => u.user && u.user.toString() === req.user._id.toString())) {
+            console.log('❌ Access denied for user:', req.user._id);
             return res.status(403).json({ error: "Access denied" });
         }
 
         task.status = status;
         await task.save();
+
+        console.log('✅ Task status updated successfully:', { taskId: task._id, newStatus: status });
 
         // Emit socket event for real-time updates
         try {

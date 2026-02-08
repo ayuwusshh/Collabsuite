@@ -453,7 +453,7 @@ const Chat = () => {
     }
 
     return (
-        <div className="h-full flex gap-4 relative">
+        <div className="absolute inset-0 -mt-6 -mx-6 flex gap-4 relative p-6">
             {/* Back Button - Mobile Only (when conversation selected) */}
             {selectedConversation && (
                 <button
@@ -479,6 +479,7 @@ const Chat = () => {
                 w-full sm:w-80 lg:w-80
                 ${!selectedConversation ? 'block' : 'hidden'} sm:${isChatListVisible ? 'block' : 'hidden'} lg:block
                 bg-[#1a2332]/40 backdrop-blur-sm border border-gray-700/40 rounded-xl flex flex-col
+                h-full
             `}>
                 <div className="p-4 border-b border-gray-700/40">
                     <div className="flex items-center justify-between mb-3">
@@ -572,6 +573,7 @@ const Chat = () => {
                 bg-[#1a2332]/40 backdrop-blur-sm border border-gray-700/40 rounded-xl 
                 flex flex-col
                 overflow-hidden
+                h-full
             `}>
                 {error && (
                     <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 m-4 flex items-center gap-2">
@@ -768,7 +770,7 @@ const Chat = () => {
                             )}
                         </div>
 
-                        <form onSubmit={handleSendMessage} className="mt-auto p-4 border-t border-gray-700/40">
+                        <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/40">
                             {/* File preview */}
                             {selectedFile && (
                                 <div className="mb-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center gap-3">

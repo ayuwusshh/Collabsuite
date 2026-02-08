@@ -51,7 +51,7 @@ const ResetPassword = () => {
                 // Redirect to dashboard after 2 seconds
                 setTimeout(() => {
                     login(response.data.token, response.data.user);
-                    navigate('/dashboard');
+                    navigate('/dashboard', { replace: true });
                 }, 2000);
             }
         } catch (err) {

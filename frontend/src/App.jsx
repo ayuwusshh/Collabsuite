@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import PrivateRoute from "./components/PrivateRoute";
+import PublicRoute from "./components/PublicRoute";
 import DashboardLayout from "./layout/DashboardLayout";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -29,9 +30,11 @@ export default function App() {
         <Route
           path="/"
           element={
-            <Suspense fallback={<LoadingSpinner />}>
-              <LandingPage />
-            </Suspense>
+            <PublicRoute>
+              <Suspense fallback={<LoadingSpinner />}>
+                <LandingPage />
+              </Suspense>
+            </PublicRoute>
           }
         />
 
@@ -39,17 +42,21 @@ export default function App() {
         <Route
           path="/forgot-password"
           element={
-            <Suspense fallback={<LoadingSpinner />}>
-              <ForgotPassword />
-            </Suspense>
+            <PublicRoute>
+              <Suspense fallback={<LoadingSpinner />}>
+                <ForgotPassword />
+              </Suspense>
+            </PublicRoute>
           }
         />
         <Route
           path="/reset-password/:token"
           element={
-            <Suspense fallback={<LoadingSpinner />}>
-              <ResetPassword />
-            </Suspense>
+            <PublicRoute>
+              <Suspense fallback={<LoadingSpinner />}>
+                <ResetPassword />
+              </Suspense>
+            </PublicRoute>
           }
         />
 

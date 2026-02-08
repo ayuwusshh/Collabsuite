@@ -215,6 +215,18 @@ export const initSocket = (server) => {
             }
         });
 
+        socket.on("draw-shape", ({ roomId, data }) => {
+            try {
+                if (!roomId || !data) {
+                    console.error('Invalid shape data');
+                    return;
+                }
+                socket.to(roomId).emit("shape-data", data);
+            } catch (error) {
+                console.error('Error in draw-shape:', error);
+            }
+        });
+
         socket.on("clear-canvas", (roomId) => {
             try {
                 if (!roomId) {

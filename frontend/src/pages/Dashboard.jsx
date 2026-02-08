@@ -230,6 +230,12 @@ const Dashboard = () => {
                                         >
                                             Tasks
                                         </Link>
+                                        <Link
+                                            to={`/dashboard/whiteboard?workspace=${workspace._id}`}
+                                            className="flex-1 px-3 py-1.5 bg-green-600/15 hover:bg-green-600/25 text-green-400 rounded-lg text-xs text-center transition-colors"
+                                        >
+                                            Whiteboard
+                                        </Link>
                                     </div>
                                 </div>
                             ))}

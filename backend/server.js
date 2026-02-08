@@ -11,6 +11,7 @@ import tasks from './routes/tasks.js';
 import meetings from './routes/meetings.js';
 import invitations from './routes/invitation.js';
 import conversations from './routes/conversations.js';
+import config from './routes/config.js';
 import { initSocket } from './socket.js';
 
 dotenv.config();
@@ -32,6 +33,7 @@ app.use('/tasks', tasks);
 app.use('/meetings', meetings);
 app.use('/invitations', invitations);
 app.use('/conversations', conversations);
+app.use('/config', config);
 
 app.get('/', (req, res) => {
   res.send("Server is running...");

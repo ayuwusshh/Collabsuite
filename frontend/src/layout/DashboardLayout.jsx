@@ -21,7 +21,7 @@ const DashboardLayout = () => {
 
     const handleLogout = () => {
         logout();
-        navigate('/');
+        navigate('/', { replace: true });
     };
 
     const menuItems = [

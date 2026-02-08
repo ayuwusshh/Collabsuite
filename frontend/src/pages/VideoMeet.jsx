@@ -5,6 +5,7 @@ import Peer from 'simple-peer';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import MeetingSidePanel from '../components/MeetingSidePanel';
+import api from '../services/api';
 
 const VideoMeet = () => {
     const { id } = useParams();
@@ -24,6 +25,7 @@ const VideoMeet = () => {
     const [isHost, setIsHost] = useState(false);
     const [hasAudioPermission, setHasAudioPermission] = useState(true);
     const [hasVideoPermission, setHasVideoPermission] = useState(true);
+    const [iceServers, setIceServers] = useState([{ urls: 'stun:stun.l.google.com:19302' }]);
 
     // Refs
     const userVideo = useRef();
@@ -31,6 +33,21 @@ const VideoMeet = () => {
     const socketRef = useRef();
     const peersRef = useRef([]); // To keep track for signaling without re-renders
     const screenStreamRef = useRef(null);
+
+    // Fetch ICE servers configuration
+    useEffect(() => {
+        const fetchIceServers = async () => {
+            try {
+                const response = await api.get('/config/ice-servers');
+                if (response.data.iceServers) {
+                    setIceServers(response.data.iceServers);
+                }
+            } catch (error) {
+                console.error('Failed to fetch ICE servers, using defaults:', error);
+            }
+        };
+        fetchIceServers();
+    }, []);
 
     // Setup local media on mount
     useEffect(() => {
@@ -226,10 +243,7 @@ const VideoMeet = () => {
             trickle: false,
             stream,
             config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
+                iceServers: iceServers
             }
         });
 
@@ -252,10 +266,7 @@ const VideoMeet = () => {
             trickle: false,
             stream,
             config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
+                iceServers: iceServers
             }
         });
 

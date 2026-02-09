@@ -161,7 +161,7 @@ const VideoMeet = () => {
             userVideo.current.srcObject = stream;
         }
 
-        const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+        const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3000');
         socketRef.current = socket;
 
         socket.emit('join-room', `meet_${id}`, user?.name || 'Anonymous');
